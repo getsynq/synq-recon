@@ -61,7 +61,8 @@ CGO must be enabled (it is by default) for DuckDB connections.
 
 ## Using the CLI
 
-**[`AGENTS.md`](AGENTS.md) is the operating guide** — the command loop, the full
+**[The operating guide](AGENTS.md)** — shipped beside the binary as `AGENTS.md` —
+covers the command loop, the full
 command and flag reference, how to read the output, exit codes, what each command
 costs, and a worked example runnable against the DuckDB fixtures in this
 repository. It is written for a coding agent driving the tool, and it is the
@@ -85,9 +86,9 @@ against workspace integrations, `promote` publishes it as a scheduled or
 API-triggerable deployment, and `recheck` / `drill-deeper` replay a finished run.
 `auth login` authenticates; run `auth whoami` to confirm which workspace you are
 acting on before anything that writes. Credential resolution order, scopes and
-the multi-region store are covered in [`AGENTS.md`](AGENTS.md) § Confirm the
-target; the store itself is owned by
-[`lib/qualityoauth`](../lib/qualityoauth/CLAUDE.md).
+the multi-region store are covered in [the operating guide](AGENTS.md) § Confirm the
+target. The credential store is shared with the other Coalesce Quality CLIs, so one
+login covers all of them.
 
 ## Supported Databases
 
@@ -678,7 +679,7 @@ Use `strategy: time` with `time_column` and `time_granularity` (hour, day, week,
 
 ## Audit Logs
 
-An audit log is the full record of a run — every query, timing, count, checksum and mismatch leaf — written as JSON by `--audit-log`. Its structure is the [AuditLog JSON schema](https://schemas.synq.io/synq-recon/v1/audit-log.schema.json), generated from the `synq/agent/recon/v1` `AuditLog` proto. Reading one, and the field-casing difference between a local file and a log fetched from the workspace, are covered in [`AGENTS.md`](AGENTS.md) § Reading the output.
+An audit log is the full record of a run — every query, timing, count, checksum and mismatch leaf — written as JSON by `--audit-log`. Its structure is the [AuditLog JSON schema](https://schemas.synq.io/synq-recon/v1/audit-log.schema.json), generated from the `synq/agent/recon/v1` `AuditLog` proto. Reading one, and the field-casing difference between a local file and a log fetched from the workspace, are covered in [the operating guide](AGENTS.md) § Reading the output.
 
 ### Where a Run's Results Go
 

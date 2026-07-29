@@ -63,7 +63,7 @@ go build -o synq-recon ./cmd/synq-recon
 ./examples/test-all-examples.sh
 ```
 
-The full command surface is in [`../AGENTS.md`](../AGENTS.md).
+The full command surface is in [the operating guide](../AGENTS.md).
 
 ## Examples (Business Scenarios)
 

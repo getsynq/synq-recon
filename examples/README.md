@@ -37,7 +37,7 @@ synq-recon run examples/ecommerce.yaml --auto-drill
 ```
 
 `ecommerce.yaml` is walked through end to end, with expected output, in
-[`../AGENTS.md`](../AGENTS.md) § Worked example.
+[the operating guide](../AGENTS.md) § Worked example.
 
 These examples run against in-memory DuckDB and every one of them is expected to
 find mismatches — that is what they demonstrate — so exit code 1 is the correct
@@ -101,6 +101,6 @@ README for the full table with per-platform notes.
 ## Further Reading
 
 - `INDEX.md` — Complete directory index and navigation
-- `../AGENTS.md` — Driving the CLI: commands, flags, output, exit codes, cost
+- [the operating guide](../AGENTS.md) — driving the CLI: commands, flags, output, exit codes, cost
 - `../README.md` — What the tool is, and the configuration reference
 - `../CLAUDE.md` — Architecture, for changing `synq-recon` itself

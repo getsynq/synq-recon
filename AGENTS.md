@@ -1,15 +1,9 @@
-# AGENTS.md — driving `synq-recon`
+# Driving `synq-recon`
 
-This file is for a coding agent **using** `synq-recon` to author, validate, run,
-promote and investigate a reconciliation suite. It is the operating guide: the
-loop to follow, the mistakes that cost real time, how to read the output, and
-what each command spends. It is written to be acted on top-down.
-
-- **`AGENTS.md` (this file)** — for agents *using* the tool.
-- **[`CLAUDE.md`](CLAUDE.md)** — for agents *modifying `synq-recon` itself*: architecture,
-  invariants, SQL-building rules. Not needed to run a reconciliation.
-- **[`README.md`](README.md)** — what the tool is, how to install it, and the full YAML
-  configuration reference.
+This is the operating guide for a coding agent using `synq-recon` to author,
+validate, run, promote and investigate a reconciliation suite: the loop to
+follow, the mistakes that cost real time, how to read the output, and what each
+command spends. It is written to be acted on top-down.
 
 A **reconciliation** compares one dataset in a source database against one in a
 target database and reports whether they agree. A **suite** is a YAML file
@@ -631,9 +625,8 @@ by group rather than by key range:
   --auto-drill --no-report
 ```
 
-More scenarios live in [`examples/`](examples/) (business cases) and
-[`tests/`](tests/) (one feature each). `./examples/test-all-examples.sh` runs
-every one.
+More scenarios live in [`examples/`](examples/), one per business case.
+`./examples/test-all-examples.sh` runs every one.
 
 ---
 
