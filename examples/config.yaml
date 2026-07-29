@@ -1,0 +1,178 @@
+# yaml-language-server: $schema=https://schemas.synq.io/synq-recon/v1/config.schema.json
+
+title: Production-Ready Reconciliation Reference
+
+description: |
+  Production-ready template demonstrating all major features with matching data
+  (all checks pass). Use this as a starting point for your own reconciliation
+  setup — replace the DuckDB connections with your real databases.
+
+  Features demonstrated:
+  - **Full mode** with hash auto-negotiation and bisection drill-down
+  - **Aggregate mode** with SUM/COUNT/AVG and tolerance thresholds
+  - **Row count mode** for fast health checks
+  - **Column mapping** for different schema naming conventions (snake_case vs UPPER)
+
+# Run with:
+#   synq-recon run-check examples/config.yaml
+
+connections:
+  # Production OLTP database (PostgreSQL example)
+  # Uncomment and configure for real use:
+  # oltp-postgres:
+  #   postgres:
+  #     host: ${DB_HOST}
+  #     port: 5432
+  #     database: production
+  #     username: recon_user
+  #     password: ${POSTGRES_PASSWORD}
+  #     allow_insecure: false
+
+  # Data warehouse (Snowflake example)
+  # Uncomment and configure for real use:
+  # warehouse-snowflake:
+  #   snowflake:
+  #     account: ${SNOWFLAKE_ACCOUNT}
+  #     warehouse: COMPUTE_WH
+  #     role: RECON_ROLE
+  #     username: ${SNOWFLAKE_USER}
+  #     password: ${SNOWFLAKE_PASSWORD}
+  #     databases:
+  #       - ANALYTICS
+
+  # MotherDuck cloud example
+  # Uncomment and configure for real use:
+  # motherduck-cloud:
+  #   duckdb:
+  #     database: my_account
+  #     motherduck_token: ${MOTHERDUCK_TOKEN}
+
+  # Local DuckDB for testing and examples
+  demo-source:
+    duckdb:
+      database: ":memory:"
+
+  demo-target:
+    duckdb:
+      database: ":memory:"
+
+setup_file:
+  demo-source: fixtures/config-source.sql
+  demo-target: fixtures/config-target.sql
+
+teardown_on_failure: true
+
+reconciliations:
+  # ============================================================================
+  # Example 1: Full Reconciliation - Transaction Data
+  # ============================================================================
+
+  daily-transactions:
+    title: Daily Transactions (OLTP vs Warehouse)
+    description: |
+      **Expected: MATCH** — Full mode with auto hash negotiation and bisection.
+    source:
+      connection: demo-source
+      table: transactions
+    target:
+      connection: demo-target
+      table: transactions
+    key_column: transaction_id
+    mode: full
+    hash_algorithm: auto
+    bisection:
+      enabled: true
+      factor: 32
+      threshold: 16384
+    reporting:
+      level: count_only
+
+  # ============================================================================
+  # Example 2: Aggregate Reconciliation - Revenue by Region
+  # ============================================================================
+
+  revenue-by-region:
+    title: Revenue by Region (Aggregate Metrics)
+    description: |
+      **Expected: MATCH** — SUM/COUNT/AVG with absolute + percentage thresholds.
+    source:
+      connection: demo-source
+      table: regional_revenue
+    target:
+      connection: demo-target
+      table: regional_revenue
+    key_column: region
+    mode: aggregate
+    aggregate:
+      measures:
+        - column: revenue
+          function: SUM
+        - column: revenue
+          function: COUNT
+        - column: revenue
+          function: AVG
+      thresholds:
+        absolute: 0.01
+        percentage: 0.0001
+
+  # ============================================================================
+  # Example 3: Row Count Mode - Quick Health Check
+  # ============================================================================
+
+  quick-count-check:
+    title: Quick Count Check (Row Count Only)
+    description: |
+      **Expected: MATCH** — Fast row count comparison for initial validation.
+    source:
+      connection: demo-source
+      table: customers
+    target:
+      connection: demo-target
+      table: customers
+    key_column: customer_id
+    mode: row_count
+
+  # ============================================================================
+  # Example 4: Column Mapping - Different Schema Names
+  # ============================================================================
+
+  cross-schema-orders:
+    title: Cross-Schema Orders (Column Mapping)
+    description: |
+      **Expected: MATCH** — Automatic case-insensitive matching plus explicit
+      column mapping for different naming conventions (snake_case to UPPER).
+    source:
+      connection: demo-source
+      table: orders
+    target:
+      connection: demo-target
+      table: orders
+    key_column: order_id
+    mode: full
+    column_mapping:
+      invoice_amount: TOTAL_PAYMENT
+      customer_name: CLIENT_NAME
+
+  # ============================================================================
+  # Real-World Usage Notes
+  # ============================================================================
+  #
+  # For production use, uncomment and configure the connection examples above:
+  #
+  # 1. Replace demo-source with oltp-postgres
+  # 2. Replace demo-target with warehouse-snowflake
+  # 3. Set environment variables:
+  #    export DB_HOST="postgres.example.com"
+  #    export POSTGRES_PASSWORD="your-password"
+  #    export SNOWFLAKE_ACCOUNT="myorg.us-east-1"
+  #    export SNOWFLAKE_USER="recon_user"
+  #    export SNOWFLAKE_PASSWORD="your-password"
+  #
+  # 4. Run reconciliation:
+  #    synq-recon run-check examples/config.yaml
+  #
+  # 5. If mismatches found, drill down:
+  #    synq-recon run-drill examples/config.yaml --include daily-transactions
+  #
+  # 6. Generate audit logs for investigation:
+  #    synq-recon run-check examples/config.yaml --audit-log=audit.json

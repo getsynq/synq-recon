@@ -1,0 +1,80 @@
+# yaml-language-server: $schema=https://schemas.synq.io/synq-recon/v1/config.schema.json
+
+title: User Activity & Data Migration
+
+description: |
+  Demonstrates **row_count mode** for quick volume checks and **full mode**
+  for exact row-by-row migration validation. Row count mode answers "did we
+  lose any events?" in a single query — no checksums, no row scanning.
+
+  ```mermaid
+  graph TD
+    subgraph "user-activity-logs (row_count)"
+      APP["App Event Logs<br/>100 events"] --> RC["COUNT comparison"]
+      ANA["Analytics Events<br/>97 events"] --> RC
+      RC -->|"100 vs 97"| R1["3 events dropped (ids 25, 50, 75)"]
+    end
+    subgraph "data-migration-validation (full)"
+      LEG["Legacy Customers<br/>10 records"] --> FC["Checksum comparison"]
+      NEW["New System<br/>9 records"] --> FC
+      FC -->|"MISMATCH"| R2["Customer 10005: email typo<br/>Customer 10010: missing"]
+    end
+  ```
+
+# Run with:
+#   synq-recon run-check examples/user-activity.yaml --include user-activity-logs -v
+#   synq-recon run-check examples/user-activity.yaml --include data-migration-validation -v
+
+connections:
+  test-db:
+    duckdb:
+      database: ":memory:"
+
+setup_file:
+  test-db: fixtures/user-activity.sql
+
+teardown:
+  test-db:
+    # - DROP TABLE IF EXISTS app_event_logs
+    # - DROP TABLE IF EXISTS analytics_events
+    # - DROP TABLE IF EXISTS legacy_customers
+    # - DROP TABLE IF EXISTS new_system_customers
+
+teardown_on_failure: true
+
+reconciliations:
+  user-activity-logs:
+    title: User Activity Logs (App Events vs Analytics)
+    description: |
+      **Expected: MISMATCH** — Detects 3 dropped events (100 vs 97) using
+      a single COUNT query per database. No checksums computed.
+    source:
+      connection: test-db
+      table: app_event_logs
+      columns: [event_id, user_id, event_type, event_timestamp, page_url, session_id]
+    target:
+      connection: test-db
+      table: analytics_events
+      columns: [event_id, user_id, event_type, event_timestamp, page_url, session_id]
+    key_column: event_id
+    mode: row_count
+
+  data-migration-validation:
+    title: Data Migration Validation (Legacy vs New System)
+    description: |
+      **Expected: MISMATCH** — Threshold=1 drills to exact rows: Customer 10005
+      has an email typo, Customer 10010 is missing from the new system.
+    source:
+      connection: test-db
+      table: legacy_customers
+      columns: [customer_id, first_name, last_name, email, phone, created_date, account_balance, loyalty_points, is_active]
+    target:
+      connection: test-db
+      table: new_system_customers
+      columns: [customer_id, first_name, last_name, email, phone, created_date, account_balance, loyalty_points, is_active]
+    key_column: customer_id
+    mode: full
+    bisection:
+      enabled: true
+      factor: 16
+      threshold: 1

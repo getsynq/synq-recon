@@ -1,0 +1,87 @@
+# yaml-language-server: $schema=https://schemas.synq.io/synq-recon/v1/config.schema.json
+
+title: E-Commerce Order & Inventory Reconciliation
+
+description: |
+  Demonstrates two reconciliation approaches for e-commerce data:
+  **full mode** compares every row by checksum to find missing or modified orders,
+  while **aggregate mode** compares grouped metrics (SUM/COUNT) to catch
+  inventory discrepancies at the SKU level.
+
+  ```mermaid
+  graph TD
+    subgraph "ecommerce-orders (full mode)"
+      PG["Payment Gateway<br/>10 orders"] --> CMP1["Row-level checksum"]
+      WH["Warehouse System<br/>9 orders"] --> CMP1
+      CMP1 -->|"MISMATCH"| R1["Order 1005: missing<br/>Order 1010: $129.99 vs $139.99"]
+    end
+    subgraph "inventory-reconciliation (aggregate mode)"
+      WI["Warehouse Inventory<br/>10 records"] --> CMP2["SUM/COUNT by SKU"]
+      ERP["ERP Inventory<br/>9 records"] --> CMP2
+      CMP2 -->|"MISMATCH"| R2["SKU-A003@WH-01: qty 45 vs 50<br/>SKU-B002@WH-02: missing"]
+    end
+  ```
+
+# Run with:
+#   synq-recon run-check examples/ecommerce.yaml --include ecommerce-orders -v
+#   synq-recon run-check examples/ecommerce.yaml --include inventory-reconciliation -v
+
+connections:
+  test-db:
+    duckdb:
+      database: ":memory:"
+
+setup_file:
+  test-db: fixtures/ecommerce.sql
+
+teardown:
+  test-db:
+    # - DROP TABLE IF EXISTS payment_gateway_orders
+    # - DROP TABLE IF EXISTS warehouse_orders
+    # - DROP TABLE IF EXISTS warehouse_inventory
+    # - DROP TABLE IF EXISTS erp_inventory
+
+teardown_on_failure: true
+
+reconciliations:
+  ecommerce-orders:
+    title: E-Commerce Orders (Payment Gateway vs Warehouse)
+    description: |
+      **Expected: MISMATCH** — Bisection drill-down pinpoints exactly which
+      orders differ: Order 1005 is missing (sync delay) and Order 1010 has
+      a wrong amount ($129.99 vs $139.99).
+    source:
+      connection: test-db
+      table: payment_gateway_orders
+      columns: [order_id, customer_id, order_date, total_amount, payment_status, shipping_address]
+    target:
+      connection: test-db
+      table: warehouse_orders
+      columns: [order_id, customer_id, order_date, total_amount, payment_status, shipping_address]
+    key_column: order_id
+    mode: full
+    bisection:
+      enabled: true
+      factor: 16
+      threshold: 8
+
+  inventory-reconciliation:
+    title: Inventory Counts (Warehouse vs ERP)
+    description: |
+      **Expected: MISMATCH** — Aggregate mode compares SUM/COUNT per SKU
+      without row-level access. Finds: SKU-A003 at WH-01 has quantity 45
+      instead of 50, and SKU-B002 at WH-02 is entirely missing.
+    source:
+      connection: test-db
+      table: warehouse_inventory
+    target:
+      connection: test-db
+      table: erp_inventory
+    key_column: sku
+    mode: aggregate
+    aggregate:
+      measures:
+        - column: quantity
+          function: SUM
+        - column: quantity
+          function: COUNT

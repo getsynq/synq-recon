@@ -1,0 +1,59 @@
+# yaml-language-server: $schema=https://schemas.synq.io/synq-recon/v1/config.schema.json
+
+title: Financial Transaction Reconciliation
+
+description: |
+  Financial data must match exactly — `threshold=1` ensures drill-down identifies
+  every single discrepancy down to the individual transaction. The quick check
+  detects count and checksum differences in a single query per database, then
+  bisection recursively narrows to the exact problematic rows.
+
+  ```mermaid
+  graph TD
+    Bank["Core Banking<br/>10 transactions"] --> QC["Quick Check"]
+    DWH["Data Warehouse<br/>8 transactions"] --> QC
+    QC -->|"count: 10 vs 8<br/>checksum: mismatch"| B["Bisection (threshold=1)"]
+    B --> L1["Transaction 50008: $5,000 vs $500"]
+    B --> L2["Transaction 50009: missing"]
+    B --> L3["Transaction 50010: missing"]
+  ```
+
+# Run with:
+#   synq-recon run-check examples/financial.yaml --include financial-transactions -v
+
+connections:
+  test-db:
+    duckdb:
+      database: ":memory:"
+
+setup_file:
+  test-db: fixtures/financial.sql
+
+teardown:
+  test-db:
+    # - DROP TABLE IF EXISTS bank_transactions
+    # - DROP TABLE IF EXISTS warehouse_transactions
+
+teardown_on_failure: true
+
+reconciliations:
+  financial-transactions:
+    title: Bank Transactions (Core Banking vs Data Warehouse)
+    description: |
+      **Expected: MISMATCH** — Drill-down with threshold=1 identifies all 3 issues:
+      Transaction 50008 has wrong amount ($5,000 vs $500), and transactions
+      50009 and 50010 are completely missing from the warehouse.
+    source:
+      connection: test-db
+      table: bank_transactions
+      columns: [transaction_id, account_number, transaction_date, amount, transaction_type, currency, status]
+    target:
+      connection: test-db
+      table: warehouse_transactions
+      columns: [transaction_id, account_number, transaction_date, amount, transaction_type, currency, status]
+    key_column: transaction_id
+    mode: full
+    bisection:
+      enabled: true
+      factor: 32
+      threshold: 1

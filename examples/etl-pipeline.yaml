@@ -1,0 +1,84 @@
+# yaml-language-server: $schema=https://schemas.synq.io/synq-recon/v1/config.schema.json
+
+title: ETL Pipeline Validation
+
+description: |
+  Validates nightly ETL output using **time-based segmentation** — instead of
+  splitting by key ranges, data is partitioned by date. Clean days are skipped
+  instantly, and only problematic days are drilled into. Two complementary
+  strategies show the same issues from different angles.
+
+  ```mermaid
+  graph TD
+    OP["Operational DB — 30 sales, Jan 15–26"] -->|"Nightly ETL"| RP["Reporting DB — 29 records, 2 wrong values"]
+    OP --> T["strategy: time<br/>granularity: day"]
+    T --> W1["Week 1"]
+    T --> W2["Week 2"]
+    W1 --> J15["Jan 15 ✓"] & J16["Jan 16 ✗<br/>wrong amount"] & J17["Jan 17 ✗<br/>missing row"] & J1819["Jan 18–19 ✓"]
+    W2 --> J2223["Jan 22–23 ✓"] & J24["Jan 24 ✗<br/>wrong quantity"] & J2526["Jan 25–26 ✓"]
+  ```
+
+# Run with:
+#   synq-recon run examples/etl-pipeline.yaml --auto-drill -v
+
+connections:
+  test-db:
+    duckdb:
+      database: ":memory:"
+
+setup_file:
+  test-db: fixtures/etl-pipeline.sql
+
+teardown:
+  test-db:
+    # - DROP TABLE IF EXISTS operational_sales
+    # - DROP TABLE IF EXISTS reporting_sales
+
+teardown_on_failure: true
+
+reconciliations:
+  row-level-by-day:
+    title: Row-Level Check by Day (Time-Based Segmentation)
+    description: |
+      **Expected: MISMATCH** — 7 out of 10 days match instantly. Only 3
+      problematic days are drilled into: Jan 16 (wrong amount), Jan 17
+      (missing row), Jan 24 (wrong quantity).
+    source:
+      connection: test-db
+      query: SELECT sale_id, sale_date, store_id, amount, quantity FROM operational_sales
+    target:
+      connection: test-db
+      query: SELECT sale_id, sale_date, store_id, amount, quantity FROM reporting_sales
+    key_column: sale_id
+    bisection:
+      strategy: time
+      time_column: sale_date
+      time_granularity: day
+
+  daily-sales-summary:
+    title: Daily Sales Summary (Aggregate by Date)
+    description: |
+      **Expected: MISMATCH** — Same issues as above, detected via aggregate
+      SUM/COUNT metrics per day. The $1 absolute + 0.1% percentage threshold
+      allows tiny floating-point noise but catches real errors.
+    source:
+      connection: test-db
+      table: operational_sales
+      columns: [sale_date, sale_id, store_id, amount, quantity]
+    target:
+      connection: test-db
+      table: reporting_sales
+      columns: [sale_date, sale_id, store_id, amount, quantity]
+    key_column: sale_date
+    mode: aggregate
+    aggregate:
+      measures:
+        - column: amount
+          function: SUM
+        - column: quantity
+          function: SUM
+        - column: amount
+          function: COUNT
+      thresholds:
+        absolute: 1.0
+        percentage: 0.001

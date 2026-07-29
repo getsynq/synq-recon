@@ -1,0 +1,80 @@
+# yaml-language-server: $schema=https://schemas.synq.io/synq-recon/v1/config.schema.json
+
+title: E-Commerce Revenue Reconciliation (Hierarchical Aggregate)
+
+description: |
+  Demonstrates **hierarchical aggregate drill-down** — starting from broad
+  categories and progressively narrowing to the exact products with discrepancies.
+  Only mismatched groups are drilled further, skipping thousands of matching records.
+
+  ```mermaid
+  graph TD
+    L1["Level 1: GROUP BY category<br/>Electronics: MATCH<br/>Sports: MISMATCH"] -->|"drill into Sports"| L2["Level 2: GROUP BY category, brand<br/>Nike: MATCH<br/>Adidas: MISMATCH"]
+    L2 -->|"drill into Adidas"| L3["Level 3: GROUP BY category, brand, product<br/>Ultraboost: $189.99 vs $190.49"]
+  ```
+
+  Real-world causes simulated:
+  - **Apple / MacBook Pro**: warehouse rounding ($2499.99 vs $2500.00)
+  - **Adidas / Ultraboost**: currency conversion difference ($189.99 vs $190.49)
+
+# Run with:
+#   synq-recon run-check examples/ecommerce-aggregate.yaml --include revenue-by-product -v
+
+connections:
+  source-db:
+    duckdb:
+      database: ":memory:"
+  target-db:
+    duckdb:
+      database: ":memory:"
+
+setup_file:
+  source-db: fixtures/ecommerce-aggregate-source.sql
+  target-db: fixtures/ecommerce-aggregate-target.sql
+
+teardown:
+  source-db:
+    # - DROP TABLE IF EXISTS order_items
+  target-db:
+    # - DROP TABLE IF EXISTS order_items
+
+teardown_on_failure: true
+
+reconciliations:
+  revenue-by-product:
+    title: Revenue by Product (Category / Brand / Product)
+    description: |
+      **Expected: MISMATCH** — 3-level drill-down (category -> brand -> product)
+      computes SUM and AVG of revenue plus SUM of units_sold per group.
+      Finds 2 product-level discrepancies caused by rounding and currency conversion.
+    source:
+      connection: source-db
+      query: |
+        SELECT category, brand, product,
+               unit_price * units_sold AS revenue,
+               units_sold
+        FROM order_items
+    target:
+      connection: target-db
+      query: |
+        SELECT category, brand, product,
+               unit_price * units_sold AS revenue,
+               units_sold
+        FROM order_items
+    key_column: category
+    mode: aggregate
+    aggregate:
+      measures:
+        - column: revenue
+          function: [SUM, AVG]
+        - column: units_sold
+          function: SUM
+      group_columns: [category, brand, product]
+      thresholds:
+        absolute: 0.01
+        per_column:
+          product:
+            absolute: 1.0
+        per_measure:
+          "AVG(revenue)":
+            percentage: 0.05

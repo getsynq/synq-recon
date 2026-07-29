@@ -1,0 +1,103 @@
+# yaml-language-server: $schema=https://schemas.synq.io/synq-recon/v1/config.schema.json
+#
+# NOTE: This example requires a real DWH connection with time-travel support.
+# It will NOT work with DuckDB or in-memory databases.
+#
+# Run with:
+#   synq-recon run-check examples/time-travel.yaml --include migration-verification -v
+
+title: Time-Travel / Snapshot Comparison
+
+description: |
+  Compare the same table at two different points in time using **DWH versioning**.
+  Useful for verifying migrations, detecting ETL drift, or auditing changes
+  between snapshots — without needing a separate copy of the data.
+
+  Supported via the `as_of` parameter:
+  - **Snowflake**: `AT(TIMESTAMP => ...)` — up to 90 days
+  - **BigQuery**: `FOR SYSTEM_TIME AS OF` — up to 7 days
+  - **Databricks**: `TIMESTAMP AS OF` — configurable
+
+connections:
+  # Replace with your credentials
+  snowflake-prod:
+    snowflake:
+      account: "your-account"
+      username: "your-user"
+      password: "your-password"
+      warehouse: "COMPUTE_WH"
+      role: "ANALYST"
+      databases:
+        - PROD_DB
+
+reconciliations:
+  migration-verification:
+    title: Migration Verification (Before vs After)
+    description: |
+      Compares the `orders` table before and after a migration.
+      Uses Snowflake's `AT(TIMESTAMP => ...)` via the `as_of` parameter.
+    source:
+      connection: snowflake-prod
+      query: SELECT * FROM orders
+      as_of: "2026-02-01 00:00:00"
+    target:
+      connection: snowflake-prod
+      query: SELECT * FROM orders
+      as_of: "2026-02-02 00:00:00"
+    key_column: order_id
+    mode: full
+
+  etl-change-detection:
+    title: ETL Change Detection (Pre vs Post Nightly Run)
+    description: |
+      Compares `customer_dim` before and after the nightly ETL run.
+      Any differences indicate records inserted, updated, or deleted.
+    source:
+      connection: snowflake-prod
+      query: SELECT * FROM customer_dim
+      as_of: "2026-02-11 06:00:00"
+    target:
+      connection: snowflake-prod
+      query: SELECT * FROM customer_dim
+      as_of: "2026-02-12 06:00:00"
+    key_column: customer_id
+    mode: full
+    bisection:
+      enabled: true
+      factor: 32
+
+  snapshot-vs-current:
+    title: Snapshot vs Current (Yesterday vs Live)
+    description: |
+      Compares yesterday's snapshot of `orders` with today's current state.
+      Only the source uses `as_of`; the target reads the live data.
+    source:
+      connection: snowflake-prod
+      query: SELECT * FROM orders
+      as_of: "2026-02-11 00:00:00"
+    target:
+      connection: snowflake-prod
+      query: SELECT * FROM orders
+    key_column: order_id
+    mode: full
+
+  embedded-time-travel:
+    title: Embedded Time-Travel (Inline SQL Syntax)
+    description: |
+      For complex queries with JOINs, embed Snowflake time-travel
+      syntax directly in the query instead of using `as_of`.
+    source:
+      connection: snowflake-prod
+      query: |
+        SELECT o.order_id, o.customer_id, o.total, c.name
+        FROM orders AT(TIMESTAMP => '2026-02-01 00:00:00'::TIMESTAMP_TZ) o
+        JOIN customers AT(TIMESTAMP => '2026-02-01 00:00:00'::TIMESTAMP_TZ) c
+          ON o.customer_id = c.customer_id
+    target:
+      connection: snowflake-prod
+      query: |
+        SELECT o.order_id, o.customer_id, o.total, c.name
+        FROM orders o
+        JOIN customers c ON o.customer_id = c.customer_id
+    key_column: order_id
+    mode: full
