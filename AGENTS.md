@@ -387,6 +387,7 @@ before you put one in a loop.
 | `recheck`, `drill-deeper` | Same as the stage they replay, but scoped to what the previous run left open — usually much cheaper than starting over. |
 | `upload-config`, `promote`, `suite …`, `deployment …`, `runs …`, `audit-logs …` | None. Workspace API only. |
 | `run-remote`, `trigger` | The run's cost, spent by the backend against workspace integrations. |
+| `upgrade`, `upgrade --check` | None. Reaches GitHub, not a warehouse and not the workspace. |
 
 Two things worth knowing specifically:
 
@@ -471,6 +472,7 @@ invocation id (a local file has nothing server-side to reference) and accepts
 | `recheck <run>` | Re-execute a finished run's queries and report what changed. `--all`, `--drill`, `--reresolve`. |
 | `drill-deeper <run>` | Continue a finished run's drill. `--threshold`, `--depth`, `--add-group-column`. |
 | `dump-suite <file>` | Print the parsed suite as protojson. Debugging aid. |
+| `upgrade` | Replace this binary with the latest release, verified against the release's `checksums.txt`. `--check` reports what it would do. |
 
 ### Workspace
 
