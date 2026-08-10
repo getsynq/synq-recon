@@ -66,17 +66,6 @@ docker run --rm -v "$PWD:/work" -w /work \
 
 The image is built with CGO enabled, so `type: duckdb` works inside it — which is what makes every example in `examples/` runnable from the image with no warehouse to stand up. If a DuckDB connection fails with a driver error, the image predates that: pull `:latest`.
 
-### From Source
-
-`synq-recon` lives in the `getsynq/cloud` monorepo, which is private, so this path is for anyone with access to it:
-
-```bash
-cd synq-recon
-go build -o synq-recon ./cmd/synq-recon
-```
-
-CGO must be enabled (it is by default) for DuckDB connections.
-
 ## Upgrading
 
 ```bash
@@ -154,7 +143,7 @@ login covers all of them.
 
 ## Configuration Reference
 
-The field-level source of truth is the published schema, at a stable versioned URL: the [configuration reference](https://schemas.synq.io/synq-recon/v1/config.html) for every field, type, constraint and default, and [`config.schema.json`](https://schemas.synq.io/synq-recon/v1/config.schema.json) to validate against or point an editor at. It is generated from `schemas/config.schema.json` in this module. This section covers the shape and the parts that need explaining.
+The field-level source of truth is the published schema, at a stable versioned URL: the [configuration reference](https://schemas.synq.io/synq-recon/v1/config.html) for every field, type, constraint and default, and [`config.schema.json`](https://schemas.synq.io/synq-recon/v1/config.schema.json) to validate against or point an editor at. This section covers the shape and the parts that need explaining.
 
 A suite's top level:
 
@@ -421,7 +410,7 @@ reconciliations:
         - DELETE FROM staging WHERE ...
 ```
 
-`setup_file` / `teardown_file` take a path per connection and run the file's statements as if they had been written inline, which is how the suites in `examples/` and `tests/` share fixtures. `ignore_setup_errors: true` downgrades a failing setup statement to a warning and runs the comparison anyway — right for idempotent bootstrap SQL (`CREATE TABLE IF NOT EXISTS`), wrong when the setup is what produces the data being compared.
+`setup_file` / `teardown_file` take a path per connection and run the file's statements as if they had been written inline, which is how the suites in `examples/` share fixtures. `ignore_setup_errors: true` downgrades a failing setup statement to a warning and runs the comparison anyway — right for idempotent bootstrap SQL (`CREATE TABLE IF NOT EXISTS`), wrong when the setup is what produces the data being compared.
 
 ### Cutoff
 
@@ -723,7 +712,7 @@ Use `strategy: time` with `time_column` and `time_granularity` (hour, day, week,
 
 ## Audit Logs
 
-An audit log is the full record of a run — every query, timing, count, checksum and mismatch leaf — written as JSON by `--audit-log`. Its structure is the [AuditLog JSON schema](https://schemas.synq.io/synq-recon/v1/audit-log.schema.json), generated from the `synq/agent/recon/v1` `AuditLog` proto. Reading one, and the field-casing difference between a local file and a log fetched from the workspace, are covered in [the operating guide](AGENTS.md) § Reading the output.
+An audit log is the full record of a run — every query, timing, count, checksum and mismatch leaf — written as JSON by `--audit-log`. Its structure is the [AuditLog JSON schema](https://schemas.synq.io/synq-recon/v1/audit-log.schema.json), generated from the [`AuditLog` proto](https://github.com/getsynq/api/blob/main/protos/synq/agent/recon/v1/recon_audit.proto) — which is public, along with the rest of the API, at [getsynq/api](https://github.com/getsynq/api) and as [SDKs on buf](https://buf.build/getsynq/api/sdks). Reading one, and the field-casing difference between a local file and a log fetched from the workspace, are covered in [the operating guide](AGENTS.md) § Reading the output.
 
 ### Where a Run's Results Go
 
@@ -733,33 +722,22 @@ A locally executed run reports its audit log to Coalesce Quality whenever it can
 
 Reporting also needs the `SCOPE_INGEST_RECON` permission. A credential without it produces a single warning naming the remedy — the comparison itself has already happened and its result is unaffected.
 
-### Regenerating Example Audit Logs
+### Example Audit Logs
 
-The `audit-logs/` directory is gitignored. Regenerate locally:
+The example suites write their audit logs where you point them, and none are
+shipped. To produce a set from the bundled examples and see what a real one looks
+like:
 
 ```bash
 ./examples/generate-audit-logs.sh
 ```
 
-## Development
+## Support
 
-```bash
-# Run tests
-go test ./...
-
-# Run with verbose
-go test -v ./...
-
-# Run specific test suite
-go test ./pkg/reconciler/... -run TestDuckDBReconcilerTestSuite -v
-
-# Run all example/test validations end-to-end
-./examples/test-all-examples.sh
-```
-
-The audit-log JSON schema is generated from the `synq/agent/recon/v1` `AuditLog` proto by
-`dev-helpers/generate-public-schemas/generate.py` in the `getsynq/cloud` monorepo (not from this
-module) and published to https://schemas.synq.io/synq-recon/v1/audit-log.schema.json.
+Every Coalesce Quality customer has a shared Slack channel with a Technical Account
+Manager. Ask there for anything — setting a suite up, tuning one, a platform you
+want supported, or something that looks wrong.
+[Support](https://docs.synq.io/support/support) has the details.
 
 ## License
 

@@ -529,14 +529,13 @@ you are rebuilding.
 
 ## 9. Worked example
 
-Runnable end to end against the DuckDB fixtures shipped in this repository — no
+Runnable end to end against the DuckDB fixtures shipped beside the binary — no
 warehouse, no credentials, no network. The suite deliberately contains a
 difference: one missing order and one with a wrong amount.
 
-```bash
-cd synq-recon
-go build -o synq-recon ./cmd/synq-recon      # needs CGO for DuckDB
-```
+Run it from an unpacked release archive, which carries `examples/` next to the
+binary. Every published build has DuckDB linked in, so the fixtures work as they
+are.
 
 **1. Validate.**
 
