@@ -13,6 +13,16 @@ Coalesce Quality database reconciliation tool, using a hierarchical checksum bis
 
 ## Installation
 
+### macOS — Homebrew
+
+```bash
+brew install getsynq/tap/synq-recon
+```
+
+`brew upgrade synq-recon` from then on. Homebrew owns the binary once it installs
+it, so `synq-recon upgrade` will point you back here rather than replace it. It
+also clears the macOS quarantine flag for you, which a plain download does not.
+
 ### Binaries
 
 The archive filename carries the version, so the version has to be resolved
