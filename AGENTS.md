@@ -26,7 +26,22 @@ Costs nothing, touches no database.
 > than discovering them mid-run. Warnings about `NOW()` / `CURRENT_DATE` are
 > real — see [Never do these](#2-never-do-these).
 
-**2. Validate against the databases — `check-config suite.yaml --db`**
+**2. Read what it will do — `plan suite.yaml`**
+
+Prints the resolved execution plan: every reconciliation the run covers, which
+connection each side uses, and the exact SQL both sides will execute after
+template variables, table references and time-travel snapshots resolve. Costs
+nothing, touches no database.
+
+> Move on when the quoted SQL is the SQL you meant to run. This is the cheapest
+> place to catch a variable that resolved to the wrong date or a table reference
+> pointing at the wrong schema — both of which otherwise surface as a confusing
+> `MISMATCH` after you have paid for the scan.
+>
+> Values a run derives from live data — a cutoff watermark, the boundaries a
+> drill picks — are named but not resolved; deriving them needs a query.
+
+**3. Validate against the databases — `check-config suite.yaml --db`**
 
 Connects to every connection, runs each query through the database's query
 planner (`LIMIT 0`), and reports the resolved columns. It also reports table
@@ -39,18 +54,18 @@ column you chose is not indexed.
 >
 > `--db` does **not** run the suite's `setup:` SQL, so a suite whose tables are
 > created by `setup` will report every query as failed. That is expected; skip
-> to step 3 for such suites.
+> to step 4 for such suites.
 
-**3. Compare — `run-check suite.yaml`**
+**4. Compare — `run-check suite.yaml`**
 
 One query per side: total row count and checksum. Fast and cheap regardless of
 table size.
 
 > If it reports `MATCH`, the datasets agree and you are done.
-> If it reports `MISMATCH`, go to step 4. Exit code 1 means "differences found",
+> If it reports `MISMATCH`, go to step 5. Exit code 1 means "differences found",
 > which is a result, not a failure.
 
-**4. Locate — `run suite.yaml --auto-drill`**
+**5. Locate — `run suite.yaml --auto-drill`**
 
 Runs the quick check, then bisects the key space on whatever mismatched to
 narrow the difference to specific key ranges. `run-drill` does the same without
@@ -61,14 +76,14 @@ re-running the quick check.
 > [Never do these](#2-never-do-these) — you are drilling something that should
 > be localised with an aggregate comparison first.
 
-**5. Save to the workspace — `upload-config suite.yaml`**
+**6. Save to the workspace — `upload-config suite.yaml`**
 
 Stores and versions the suite in your Coalesce Quality workspace, where it
 appears under **Development**. Requires `SCOPE_RECON_EDIT`.
 
 > Run `auth whoami` first. Move on when it prints the suite id.
 
-**6. Run it on the backend — `run-remote <suite-id> --wait`**
+**7. Run it on the backend — `run-remote <suite-id> --wait`**
 
 Executes the suite in Coalesce Quality against workspace integrations rather
 than against databases this machine can reach. Connections bind to integrations
@@ -79,7 +94,7 @@ by name; override with `--map connection=integration_id`.
 > **Pass `--drill=false` explicitly if you do not want a drill** — omitting the
 > flag does not mean "off".
 
-**7. Publish to production — `promote <suite-id>`**
+**8. Publish to production — `promote <suite-id>`**
 
 Creates a deployment: an immutable snapshot of the suite plus an optional
 schedule, so it runs on its own and its results become platform assets, checks
@@ -89,6 +104,9 @@ and issues. Requires `SCOPE_RECON_PROMOTE`.
 > changes nothing in production until you re-promote. Re-promoting preserves
 > settings you omit; a *fresh* promote applies defaults, and the drill default
 > on a fresh promote is **on**.
+>
+> Run `promote <suite-id> --diff` with the same flags first — it shows what
+> would change in production and promotes nothing.
 
 **Any time after a run:** `recheck <run>` re-executes what it ran and reports
 what moved; `drill-deeper <run>` continues its drill from where it stopped. Both
@@ -256,6 +274,34 @@ Points that decide whether it works:
   the same connection names. This is also what lets the same suite run locally
   and in the workspace, where the names bind to integrations instead.
 
+### Finding the physical table path
+
+Both sides of a reconciliation are named by their physical
+`database.schema.table`, and on a warehouse whose naming you do not control
+that is the part you may not know. If the warehouse is connected to your
+workspace as an integration, ask the catalog:
+
+```bash
+# By name — description and column text are searched too
+synq-recon entities search orders --type snowflake_table
+
+# By a name you already have, to find which warehouse it is in
+synq-recon entities resolve ANALYTICS.PUBLIC.ORDERS
+```
+
+Both print the SQL-addressable `database`, `schema` and `table` — exactly what
+goes into a `table:` block — plus the dialect and connection id, which is how
+you tell apart the several warehouses one `db.schema.table` can legitimately
+match.
+
+**This is a convenience and never a prerequisite.** The catalog holds only
+warehouses connected to the workspace as integrations, so a database you
+reconcile locally — a DuckDB file, a container, anything reachable from this
+machine but never integrated — will not appear, and that says nothing about
+whether a suite naming it runs. Nothing else in this tool consults the catalog:
+`check-config`, `plan` and every run command work entirely from the suite and
+its connections file, with or without a workspace.
+
 The exhaustive field list is the published schema, at a stable versioned URL:
 
 - [Configuration reference](https://schemas.synq.io/synq-recon/v1/config.html) —
@@ -317,6 +363,10 @@ synq-recon run-drill suite.yaml --include orders-daily -o json \
 synq-recon run-drill suite.yaml --include orders-daily -o json \
   | jq -r '.investigation_queries[0] | .source_query, .target_query'
 ```
+
+For a run that already finished, `audit-logs queries <run>` gets the same SQL
+out of its audit log without re-running anything — see
+[Investigating a finished run](#7-investigating-a-finished-run).
 
 **Logs go to stderr, results to stdout.** Redirect with `2>/dev/null`, never
 `2>&1`, when piping `-o json`.
@@ -380,12 +430,12 @@ before you put one in a loop.
 
 | Command | Warehouse cost |
 |---|---|
-| `check-config` | None. Never connects. |
+| `check-config`, `plan` | None. Never connects. |
 | `check-config --db` | One planner call per query (`LIMIT 0`, no scan) plus a table-metadata sweep. |
 | `run-check` | One aggregate query per side. Scans the compared columns once. |
 | `run-drill`, `run --auto-drill` | One bucketed query per bisection level per side. Cheap on mostly-identical data, expensive when most rows differ. |
 | `recheck`, `drill-deeper` | Same as the stage they replay, but scoped to what the previous run left open — usually much cheaper than starting over. |
-| `upload-config`, `promote`, `suite …`, `deployment …`, `runs …`, `audit-logs …` | None. Workspace API only. |
+| `upload-config`, `promote`, `suite …`, `deployment …`, `runs …`, `audit-logs …`, `entities …` | None. Workspace API only. |
 | `run-remote`, `trigger` | The run's cost, spent by the backend against workspace integrations. |
 | `upgrade`, `upgrade --check` | None. Reaches GitHub, not a warehouse and not the workspace. |
 
@@ -416,8 +466,34 @@ to resolve no credential and open no connection at all.
 
 ## 7. Investigating a finished run
 
-`recheck` and `drill-deeper` take a finished run instead of a suite — either a
-local audit-log file or, for a run stored in the workspace, its invocation id.
+`audit-logs queries`, `recheck` and `drill-deeper` all take a finished run
+instead of a suite — either a local audit-log file or, for a run stored in the
+workspace, its invocation id.
+
+**Get the SQL back — `audit-logs queries <run>`.** A locally executed run prints
+its investigation queries as it finishes; this is how you get them afterwards,
+from a stored run, from a backend run you never watched, or from a terminal
+whose scrollback is gone. It reaches no warehouse.
+
+```bash
+# The ready-to-run SQL for whatever the run found, both sides
+synq-recon audit-logs queries audit.json
+
+# One reconciliation of a stored run
+synq-recon audit-logs queries 3f7c1e28-5a1b-4c9e-9f10-2b7d8e6a4c53 --include orders-daily
+
+# What the run itself issued, in stage order
+synq-recon audit-logs queries audit.json --executed
+
+# Pipe one side straight into a client
+synq-recon audit-logs queries audit.json -o json | jq -r '.[0].source_query'
+```
+
+What comes out follows how the difference was found. A bisection drill yields
+merged key-range queries — one per run of adjacent mismatched segments, since
+neighbouring bad segments are one range rather than five; `--all-leaves` also
+prints the per-segment queries those cover. An aggregate comparison yields one
+pair per divergent group. A run that matched, or never drilled, has none.
 
 ```bash
 # Did the difference go away? (e.g. after a backfill)
@@ -466,6 +542,7 @@ invocation id (a local file has nothing server-side to reference) and accepts
 | Command | What it does |
 |---|---|
 | `check-config <file>` | Validate a suite. `--db` also connects, validates every query, and analyses tables. |
+| `plan <file>` | Print the resolved execution plan — the exact SQL each side will run — without executing it. |
 | `run-check <file>` | Stage 1: counts and checksums. |
 | `run-drill <file>` | Stage 2: bisect to locate differences. `--depth`, `--threshold`. |
 | `run <file>` | Stage 1, then stage 2 on whatever mismatched with `--auto-drill`. |
@@ -482,13 +559,14 @@ invocation id (a local file has nothing server-side to reference) and accepts
 | `upload-config <file>` | Save a suite to the workspace (Development). `--change-summary`. |
 | `suite list` / `get` / `yaml` / `versions` / `delete` / `bootstrap` | Manage stored suites. `yaml` renders one back to editable YAML; `bootstrap` prints a skeleton. `list` takes `--connection`, `--include-adhoc`, `--limit`. |
 | `connections remote list` / `bootstrap` | Inspect workspace integrations; generate a matching `.connections.yaml`. |
+| `entities search <text>` / `resolve <fqn>` | Find a table's physical `database.schema.table` in the workspace catalog. Optional — see § 4. |
 | `run-remote <suite-id>` | Ad-hoc backend run. `--drill`, `--map`, `--execution-timeout`, `--invocation-id`, `--wait`, `--fail-on`, `--wait-timeout`, `--poll-interval`. |
-| `promote <suite-id>` | Publish to Production. `--schedule` (cron) or `--ical` (RFC 5545) with `--timezone` and optional `--dtstart`, plus `--triggerable-by-api`, `--drill`, `--execution-timeout`, `--map`, `--annotation`, `--clear-schedule`, `--deployment-id`, `--change-summary`. |
+| `promote <suite-id>` | Publish to Production. `--diff` previews and promotes nothing. `--schedule` (cron) or `--ical` (RFC 5545) with `--timezone` and optional `--dtstart`, plus `--triggerable-by-api`, `--drill`, `--execution-timeout`, `--map`, `--annotation`, `--clear-schedule`, `--deployment-id`, `--change-summary`. |
 | `trigger <suite-id>` | Run a promoted deployment on demand. `--drill`, `--execution-timeout`, `--wait`, `--fail-on`, `--deployment-id`. |
 | `unpromote <suite-id>` | Deactivate a deployment; history is kept. `--reason`. |
 | `deployment list` / `get` / `history` / `update` / `pause` / `resume` / `set-annotations` | Inspect and edit deployments in place. `update` takes the same schedule and run-setting flags as `promote`, plus `--clear`; `pause` takes `--until`. |
 | `runs list` / `cancel` | Inspect and cancel run state. `list` filters on `--status`, `--trigger`, `--suite`, `--deployment`, `--actor`, `--limit`. |
-| `audit-logs list` / `get <invocation-id>` | Inspect stored run results. `list` filters on `--status`, `--suite`, `--limit`. |
+| `audit-logs list` / `get <invocation-id>` / `queries <run>` | Inspect stored run results. `list` filters on `--status`, `--suite`, `--limit`; `queries` prints a finished run's investigation SQL, or `--executed` for what it ran. |
 
 **Deployment edits preserve what you omit.** `promote` on a re-promote, and
 `deployment update` always, change only the settings you actually pass — so
@@ -496,6 +574,21 @@ refreshing a suite snapshot never silently unschedules the deployment or
 disables API triggers. Removing a schedule is therefore explicit:
 `deployment update --clear` or `promote --clear-schedule`. A *fresh* promote
 applies defaults instead: no schedule, not triggerable, drill on.
+
+**Check a promote before making it.** Promotion replaces what production runs,
+and a deployment is a snapshot rather than a pointer, so there is no undo short
+of promoting again. `promote <suite-id> --diff` runs the exact invocation you
+are about to run and applies nothing:
+
+```bash
+synq-recon promote orders-suite --diff --schedule '0 * * * *' --timezone UTC
+```
+
+It prints a YAML diff of the deployed snapshot against the stored suite, then
+every deployment setting labelled with what this invocation does to it —
+`changed`, `unchanged`, `preserved (flag not passed)`, or the fresh-promote
+default. That labelling is the point: an omitted `--schedule` and a removed
+schedule are indistinguishable from the command line alone.
 
 **A deployment's id is part of every reconciliation's asset path**, so it is
 worth keeping stable — rebuilding a deployment from scratch under a new id
@@ -514,7 +607,6 @@ you are rebuilding.
 | `--var key=value` | Set or override a template variable; repeatable. |
 | `--connections` | Connections file. Auto-discovers `.connections.yaml` / `connections.yaml` in the working directory. |
 | `--dbt-profiles` | Resolve connections from a dbt `profiles.yml` as a fallback. |
-| `-e, --environment`, `--env-file` | Apply a named set of overrides at load time. **Local only** — the workspace does not apply them. |
 | `--timeout` | Per-query timeout for locally executed commands, default `5m`. Not the server-side run budget — that is `--execution-timeout`. |
 | `--concurrency` | Reconciliations to run in parallel, default `1`. |
 | `--max-table-rows`, `--max-table-bytes` | Pre-run scan estimate gate; `0` = off. |

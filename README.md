@@ -484,40 +484,29 @@ annotations:
 
 Whichever you write, the loader normalises to the canonical list — names and values sorted — so `suite yaml` output and version-history diffs never show order-only changes. A name is required; values are optional. Both names and values cap at 50 characters, with at most 20 values per name.
 
-### Environments
+### Pointing a suite at a different database
 
-An environment is a named set of overrides applied at load time — most usefully swapping the database or schema a suite points at while you author against a dev copy:
+A suite that has to run against more than one copy of the same data — a dev
+schema while authoring, the real one in CI — parameterises the parts that move
+with `variables:` and overrides them per run with `--var`:
 
 ```yaml
-# environments.yaml, or <suite>.env.yaml next to the suite
-environments:
-  dev:
-    description: "Author against the dev copy"
-    connections:
-      snowflake-main:
-        table_path:
-          database: DEV_SANDBOX
-          schema: ANALYTICS
-          table_prefix: ""
-          table_suffix: "_v2"
-    datasets:
-      orders-daily.source:
-        table_path:
-          schema: STAGING
-    variables:
-      lookback_days: "7"
+variables:
+  schema: ANALYTICS
+
+reconciliations:
+  - name: orders-daily
+    source:
+      connection: snowflake-main
+      query: "SELECT * FROM {{schema}}.ORDERS"
 ```
 
 ```bash
-synq-recon run-check suite.yaml --environment dev
-synq-recon run-check suite.yaml -e dev --env-file path/to/environments.yaml
+synq-recon run-check suite.yaml --var schema=DEV_SANDBOX
 ```
 
-With `--env-file` omitted, the file is discovered as `<suite>.yaml.env.yaml`, `<suite>.env.yaml`, or `environments.yaml` in the suite's directory, in that order.
-
-An override resolves most-specific-first: a `datasets` entry keyed `<reconciliation>.source` or `<reconciliation>.target` beats a `connections` entry, and only the fields it sets are changed. `table_path` overrides rewrite a `table:` reference, so a dataset written as `query:` is unaffected — `variables` are the lever there.
-
-**Environments are local-only.** `--environment` and `--env-file` are applied by this CLI when it loads a suite; the workspace does not apply them, so a suite uploaded with `upload-config` and run with `run-remote` or a promoted deployment sees no overrides. Use them for local authoring, not to model dev and prod in the platform.
+Variables are part of the suite, so they resolve the same way wherever the suite
+runs: locally, through `run-remote`, and on a promoted deployment.
 
 ### Reporting Credentials
 
