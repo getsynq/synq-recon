@@ -436,7 +436,9 @@ Progressive disclosure, in three levels:
 cutoff:
   source_column: created_at
   target_column: synced_at
+```
 
+```yaml
 # Level 3 — full control per side
 cutoff:
   source:
@@ -472,7 +474,9 @@ annotations:
   team: data-platform
   domain: [revenue, billing]
   critical:
+```
 
+```yaml
 # Canonical list form
 annotations:
   - name: team
@@ -542,8 +546,14 @@ Coalesce Quality CLI now shares.
 Use `${VAR_NAME}` syntax for sensitive values:
 
 ```yaml
-password: ${POSTGRES_PASSWORD}
-password: ${DB_PASS:-default_value}  # with default
+connections:
+  my-postgres:
+    postgres:
+      host: localhost
+      database: mydb
+      username: myuser
+      password: ${POSTGRES_PASSWORD}
+      # ${DB_PASS:-default_value} substitutes the default when the variable is unset
 ```
 
 ## Reconciliation Modes
@@ -576,7 +586,9 @@ case_insensitive: true  # default
 column_mapping:
   source_col: target_col
   invoice_amount: total_payment
+```
 
+```yaml
 # Array format
 column_mapping:
   - source: order_id
