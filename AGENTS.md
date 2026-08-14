@@ -561,10 +561,10 @@ invocation id (a local file has nothing server-side to reference) and accepts
 | `connections remote list` / `bootstrap` | Inspect workspace integrations; generate a matching `.connections.yaml`. |
 | `entities search <text>` / `resolve <fqn>` | Find a table's physical `database.schema.table` in the workspace catalog. Optional — see § 4. |
 | `run-remote <suite-id>` | Ad-hoc backend run. `--drill`, `--map`, `--execution-timeout`, `--invocation-id`, `--wait`, `--fail-on`, `--wait-timeout`, `--poll-interval`. |
-| `promote <suite-id>` | Publish to Production. `--diff` previews and promotes nothing. `--schedule` (cron) or `--ical` (RFC 5545) with `--timezone` and optional `--dtstart`, plus `--triggerable-by-api`, `--drill`, `--execution-timeout`, `--map`, `--annotation`, `--clear-schedule`, `--deployment-id`, `--change-summary`. |
+| `promote <suite-id>` | Publish to Production. `--diff` previews and promotes nothing. `--schedule` (cron) or `--ical` (RFC 5545) with `--timezone` and optional `--dtstart`, plus `--triggerable-by-api`, `--drill`, `--execution-timeout`, `--map`, `--annotation`, `--category`, `--governance-category`, `--case-category`, `--case-governance-category`, `--clear-schedule`, `--deployment-id`, `--change-summary`. |
 | `trigger <suite-id>` | Run a promoted deployment on demand. `--drill`, `--execution-timeout`, `--wait`, `--fail-on`, `--deployment-id`. |
 | `unpromote <suite-id>` | Deactivate a deployment; history is kept. `--reason`. |
-| `deployment list` / `get` / `history` / `update` / `pause` / `resume` / `set-annotations` | Inspect and edit deployments in place. `update` takes the same schedule and run-setting flags as `promote`, plus `--clear`; `pause` takes `--until`. |
+| `deployment list` / `get` / `history` / `update` / `pause` / `resume` / `set-annotations` / `set-categories` | Inspect and edit deployments in place. `update` takes the same schedule and run-setting flags as `promote`, plus `--clear`; `pause` takes `--until`; `set-categories` takes the four category flags. |
 | `runs list` / `cancel` | Inspect and cancel run state. `list` filters on `--status`, `--trigger`, `--suite`, `--deployment`, `--actor`, `--limit`. |
 | `audit-logs list` / `get <invocation-id>` / `queries <run>` | Inspect stored run results. `list` filters on `--status`, `--suite`, `--limit`; `queries` prints a finished run's investigation SQL, or `--executed` for what it ran. |
 
@@ -574,6 +574,54 @@ refreshing a suite snapshot never silently unschedules the deployment or
 disables API triggers. Removing a schedule is therefore explicit:
 `deployment update --clear` or `promote --clear-schedule`. A *fresh* promote
 applies defaults instead: no schedule, not triggerable, drill on.
+
+**Declare a check category on the promotion, not in the suite file.** A
+reconciliation becomes a *check* only once it is promoted, so where it sits in
+the catalog is a property of the deployment — the same reason the schedule lives
+there. Two independent dimensions are available, and both are free-form strings
+using whatever vocabulary the workspace already has:
+
+- `--category` is the **technical** dimension: what kind of check this is,
+  mechanically. It is what makes the same check comparable across tools, so a
+  reconciliation, a dbt test and a SQLMesh audit that all compare values can share
+  one category.
+- `--governance-category` is what the check is **for** — the dimension a
+  data-governance function tracks coverage against.
+
+Both dimensions and the vocabulary in use are described in
+[Check categories](https://docs.synq.io/analytics/check-categories).
+
+```bash
+# every case of this suite compares values, and covers accuracy
+synq-recon promote orders-suite --category comparison --governance-category accuracy
+
+# change it later without re-promoting the suite
+synq-recon deployment set-categories orders-suite --governance-category accuracy
+```
+
+Each dimension is patched on its own: a flag you omit keeps its stored value, and
+passing an empty value clears the declaration. So `--category ""` stops declaring
+a technical category while leaving the governance one alone.
+
+Cases of one suite are the same *kind* of check but do not always serve the same
+governance purpose, so either dimension can be overridden per case. A case
+overrides only the dimensions you name and inherits the rest:
+
+```bash
+# this case only compares row counts, so it covers completeness rather than accuracy
+synq-recon deployment set-categories orders-suite --case-governance-category row-counts=completeness
+```
+
+Declaring nothing is the default, and it is not the same as declaring nothing
+*for a case*. With no declaration, a category is decided by a reserved
+`quality.check_category` / `quality.governance_category` annotation on the suite
+or case if one is set, and otherwise by the workspace's own categorisation rules
+— so leaving these flags alone keeps whatever already categorises your checks.
+Passing `--case-category customers=` declares that *this case* has no category,
+which overrides the deployment's declaration rather than inheriting it.
+
+Annotations reach the check too, so `annotations:` in the suite file drives
+annotation-matching categorisation rules without any of these flags.
 
 **Check a promote before making it.** Promotion replaces what production runs,
 and a deployment is a snapshot rather than a pointer, so there is no undo short
