@@ -267,6 +267,13 @@ Points that decide whether it works:
   catches any difference); `aggregate` compares grouped measures like `SUM` and
   `COUNT` with a tolerance, and drills down through a `group_columns` hierarchy.
   `full` is an accepted legacy spelling of `row_checksum`; write `row_checksum`.
+- **The two sides need the same number of columns — except in `row_count`.** The
+  checksum modes hash the compared columns position by position, so a wider
+  target fails with `source has N columns but target has M columns`. Narrow both
+  sides with `columns:`, or drop the extras with `exclude_columns:` on the wider
+  side. `row_count` reads no column at all and compares whatever the two sides
+  are, so a target with extra columns needs no column list; only the key columns
+  have to exist on both sides.
 - **Column names differing only in case match automatically.** For genuinely
   different names use `column_mapping`.
 - **Keep credentials out of the suite.** Put them in a git-ignored

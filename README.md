@@ -562,9 +562,13 @@ connections:
 
 Compares only row counts - fastest, detects missing/extra rows but not modified values.
 
+Nothing in this mode reads a column, so the two sides do not have to have the same columns. A target carrying columns the source does not have is compared as it stands, with no `columns:` list needed to make the two sides look alike; only the key columns have to exist on both sides so a drill-down can range over them.
+
 ### Row Checksum Mode (`mode: row_checksum`, default)
 
 Compares row counts and checksums of all columns - detects any differences including modified values. `full` is accepted as a legacy spelling; the YAML writer emits `row_checksum`.
+
+The hash runs over the compared columns position by position, so both sides must present the same number of columns. A wider target is the usual cause of `source has N columns but target has M columns`: narrow both sides with `columns:`, drop the extras with `exclude_columns:` on the wider side, or use `mode: row_count` if only presence matters.
 
 ### Aggregate Mode (`mode: aggregate`)
 
