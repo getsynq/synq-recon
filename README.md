@@ -450,7 +450,7 @@ cutoff:
       SELECT MAX(synced_at) AS watermark FROM warehouse.orders
   combine: min              # min (default), max, source, target
   truncate: HOUR            # HOUR, DAY, WEEK, MONTH, QUARTER, YEAR
-  offset: "-30m"            # applied after truncation; negative = safety buffer
+  offset: "-30m"            # applied after truncation; negative = safety buffer; s, m, h, d or w
   apply:                    # filter a different column than the one derived from
     source: { column: created_at, operator: "<=" }
     target: { column: created_at, operator: "<=" }

@@ -276,6 +276,20 @@ Points that decide whether it works:
   have to exist on both sides.
 - **Column names differing only in case match automatically.** For genuinely
   different names use `column_mapping`.
+- **Write names the way you would write them unquoted; quote only to pin one.**
+  Every part of a `table:` and every entry of its `columns:` is quoted for the
+  warehouse it runs on, so a table or column named after a reserved word
+  (`order`, `group`) works as written. An unquoted name resolves the way the
+  warehouse resolves an unquoted reference, `orders` is `ORDERS` on Snowflake
+  and `orders` on Postgres. To name an object created with quotes, a
+  lower-case Snowflake table or a name with a dot in it, quote that part
+  yourself: `table: 'DB.SCH."events"'`. The outer single quotes are YAML's,
+  because a value starting with `"` is not a plain string. Column names in
+  `key_columns`, `column_mapping` and `cutoff:` are looked up in what the
+  warehouse reports, ignoring case, so `last_updated_date_time` finds a
+  Snowflake column `LAST_UPDATED_DATE_TIME`.
+  A `cutoff.offset` or `window.lookback` is a whole number and one of `s`, `m`,
+  `h`, `d`, `w` (`-15m`, `-900s`), or a Go duration such as `1h30m`.
 - **Keep credentials out of the suite.** Put them in a git-ignored
   `.connections.yaml` (auto-discovered, or passed with `--connections`) keyed by
   the same connection names. This is also what lets the same suite run locally
