@@ -163,6 +163,7 @@ teardown_file: {...}
 teardown_on_failure: false        # run teardown even when reconciliations fail
 ignore_setup_errors: false        # log setup errors as warnings and continue
 strict_time_references: false     # turn NOW()/CURRENT_DATE warnings into an error
+execution: {...}                  # see Run Timeout and Parallelism
 synq: {...}                       # see Reporting Credentials
 ```
 
@@ -487,6 +488,20 @@ annotations:
 ```
 
 Whichever you write, the loader normalises to the canonical list — names and values sorted — so `suite yaml` output and version-history diffs never show order-only changes. A name is required; values are optional. Both names and values cap at 50 characters, with at most 20 values per name.
+
+### Run Timeout and Parallelism
+
+How a run of the suite executes. Stored with the suite, so a local run, a run in the workspace and a production deployment all read the same values:
+
+```yaml
+execution:
+  timeout: 30m        # wall-clock budget for the whole run (local default 5m)
+  concurrency: 4      # reconciliations running at the same time (default 1)
+```
+
+`--timeout` and `--concurrency` override them for a local run. A run in the workspace takes the most specific timeout set: the one passed for that run (`--execution-timeout`), the deployment's, then the suite's, and clamps it to a supported range; concurrency may also be capped lower. A run that hits its timeout is cancelled, and the reconciliations still running are reported as failed.
+
+Each parallel reconciliation queries both warehouses at once, so `concurrency` multiplies the load on them; `parallelism` on each connection still bounds the queries it runs at a time.
 
 ### Pointing a suite at a different database
 

@@ -676,8 +676,8 @@ you are rebuilding.
 | `--var key=value` | Set or override a template variable; repeatable. |
 | `--connections` | Connections file. Auto-discovers `.connections.yaml` / `connections.yaml` in the working directory. |
 | `--dbt-profiles` | Resolve connections from a dbt `profiles.yml` as a fallback. |
-| `--timeout` | Per-query timeout for locally executed commands, default `5m`. Not the server-side run budget — that is `--execution-timeout`. |
-| `--concurrency` | Reconciliations to run in parallel, default `1`. |
+| `--timeout` | Wall-clock budget of a local run. Default: the suite's `execution.timeout`, else `5m`. Not the server-side run budget — that is `--execution-timeout`, which falls back to the deployment's value, then the suite's `execution.timeout`. |
+| `--concurrency` | Reconciliations to run in parallel. Default: the suite's `execution.concurrency`, else `1`. Server-side runs read `execution.concurrency` and may cap it lower. |
 | `--max-table-rows`, `--max-table-bytes` | Pre-run scan estimate gate; `0` = off. |
 | `--audit-log` | Write the run's audit log JSON to a file, or to a directory for an auto-named one. |
 | `--no-report` | Keep the run local (or `RECON_NO_REPORT`). |
