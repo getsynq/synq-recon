@@ -267,6 +267,8 @@ Points that decide whether it works:
   `row_checksum` compares counts and a checksum of every column (the default,
   catches any difference); `aggregate` compares grouped measures like `SUM` and
   `COUNT` with a tolerance, and drills down through a `group_columns` hierarchy.
+  With no `group_columns`, it groups by the key columns; with no key columns
+  either, it compares the whole dataset as one group.
   `full` is an accepted legacy spelling of `row_checksum`; write `row_checksum`.
 - **The two sides need the same number of columns — except in `row_count`.** The
   checksum modes hash the compared columns position by position, so a wider
@@ -804,7 +806,7 @@ More scenarios live in [`examples/`](examples/), one per business case.
 | `no connections available to replay run …` | `recheck` / `drill-deeper` need `--connections`: an audit log records connection names, never credentials. |
 | `accepts 1 arg(s), received 2` | A reconciliation name was passed positionally. Use `--include <name>`. |
 | A drill produces thousands of leaves and takes minutes | The data is not mostly-identical. Localise with an aggregate comparison first — see [Never do these](#2-never-do-these). |
-| `grouping by <columns> produced more than … groups` | An aggregate compares groups, and this grouping has nearly one group per row, usually because `group_columns` is unset and the key column stands in for it. Group by a coarser column, use `row_count` to compare counts (with `row_count.thresholds` for a tolerance), or `row_checksum` to compare row by row. |
+| `grouping by <columns> produced more than … groups` | An aggregate compares groups, and this grouping has nearly one group per row, usually because `group_columns` is unset and the key column stands in for it. Group by a coarser column, leave both `group_columns` and the key columns unset to compare totals over the whole dataset, use `row_count` to compare counts (with `row_count.thresholds` for a tolerance), or `row_checksum` to compare row by row. |
 | A warning that the stored credential is missing a scope | The command still works if the scope it needs is present. A credential without the reporting scope only means a local run's results are not reported; the comparison is unaffected. |
 | `deployment is not active; re-promote to modify` | The deployment was unpromoted. Re-promote before changing or tearing it down. |
 | `N connection(s) could not be bound to an integration` | A suite connection has no matching workspace integration, or the integration is not permitted for reconciliation. Check names with `connections remote list`, or bind explicitly with `--map name=integration_id`. |
