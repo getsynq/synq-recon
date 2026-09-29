@@ -262,7 +262,8 @@ Points that decide whether it works:
 - **Key columns drive everything.** Bisection orders and range-filters on them,
   so they must be unique and, ideally, indexed. `check-config --db` suggests one
   and warns if yours is not indexed.
-- **Modes.** `row_count` compares counts only (fastest, misses modified values);
+- **Modes.** `row_count` compares counts only (fastest, misses modified values,
+  and takes a tolerance in `row_count.thresholds` for a replica that lags);
   `row_checksum` compares counts and a checksum of every column (the default,
   catches any difference); `aggregate` compares grouped measures like `SUM` and
   `COUNT` with a tolerance, and drills down through a `group_columns` hierarchy.
@@ -289,7 +290,9 @@ Points that decide whether it works:
   warehouse reports, ignoring case, so `last_updated_date_time` finds a
   Snowflake column `LAST_UPDATED_DATE_TIME`.
   A `cutoff.offset` or `window.lookback` is a whole number and one of `s`, `m`,
-  `h`, `d`, `w` (`-15m`, `-900s`), or a Go duration such as `1h30m`.
+  `h`, `d`, `w`, or a Go duration such as `1h30m`. An offset is signed and
+  usually negative (`-15m`, `-900s`); a lookback is how far back to look, so it
+  is positive (`14d`) — a zero or negative one is ignored, with a warning.
 - **Keep credentials out of the suite.** Put them in a git-ignored
   `.connections.yaml` (auto-discovered, or passed with `--connections`) keyed by
   the same connection names. This is also what lets the same suite run locally
@@ -347,7 +350,7 @@ findings are really a comparison window problem. Reach for these first.
 | Symptom | Use | What it does |
 |---|---|---|
 | Target lags the source; the tail looks "missing" | `cutoff:` | Derives a watermark from the data on each side, combines them (`min` by default — the point both sides have certainly reached), optionally truncates and offsets it, and filters both sides to at-or-below it. |
-| Only the recent window matters | `window:` | Restricts the comparison to a lookback period. |
+| Only the recent window matters | `window:` | Restricts the comparison to a lookback period: with a `column`, each table side is filtered on it; in a query, reference `{{window_start}}` / `{{window_end}}`. A cutoff on top of it reads its watermark from inside the window. |
 | Queries need a date or an id boundary | `variables:` | Resolved once, interpolated into both sides, recorded in the audit log. Override per run with `--var key=value`. |
 | Comparing against a point-in-time snapshot | `as_of:` | Time-travel query on platforms that support it. |
 
@@ -801,7 +804,7 @@ More scenarios live in [`examples/`](examples/), one per business case.
 | `no connections available to replay run …` | `recheck` / `drill-deeper` need `--connections`: an audit log records connection names, never credentials. |
 | `accepts 1 arg(s), received 2` | A reconciliation name was passed positionally. Use `--include <name>`. |
 | A drill produces thousands of leaves and takes minutes | The data is not mostly-identical. Localise with an aggregate comparison first — see [Never do these](#2-never-do-these). |
-| `grouping by <columns> produced more than … groups` | An aggregate compares groups, and this grouping has nearly one group per row, usually because `group_columns` is unset and the key column stands in for it. Group by a coarser column, use `row_count` to compare counts, or `row_checksum` to compare row by row. |
+| `grouping by <columns> produced more than … groups` | An aggregate compares groups, and this grouping has nearly one group per row, usually because `group_columns` is unset and the key column stands in for it. Group by a coarser column, use `row_count` to compare counts (with `row_count.thresholds` for a tolerance), or `row_checksum` to compare row by row. |
 | A warning that the stored credential is missing a scope | The command still works if the scope it needs is present. A credential without the reporting scope only means a local run's results are not reported; the comparison is unaffected. |
 | `deployment is not active; re-promote to modify` | The deployment was unpromoted. Re-promote before changing or tearing it down. |
 | `N connection(s) could not be bound to an integration` | A suite connection has no matching workspace integration, or the integration is not permitted for reconciliation. Check names with `connections remote list`, or bind explicitly with `--map name=integration_id`. |

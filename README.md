@@ -596,6 +596,24 @@ Compares only row counts - fastest, detects missing/extra rows but not modified 
 
 Nothing in this mode reads a column, so the two sides do not have to have the same columns. A target carrying columns the source does not have is compared as it stands, with no `columns:` list needed to make the two sides look alike; only the key columns have to exist on both sides so a drill-down can range over them.
 
+A replica that always lags a little (change data capture, a loader running every few minutes) can be given a tolerance with `row_count.thresholds`. A difference within `absolute` rows, or within `percentage` of the count, is reported as mismatched within threshold rather than mismatched, and is not drilled into. `percentage_mode` picks what the percentage is computed against: `source` (default), `target` or `symmetric`. Without thresholds the counts must be equal.
+
+```yaml
+reconciliations:
+  orders-replica:
+    source:
+      connection: postgres
+      table: public.orders
+    target:
+      connection: snowflake
+      table: analytics.raw.orders
+    key_columns: [id]
+    mode: row_count
+    row_count:
+      thresholds:
+        percentage: 0.0005  # 0.05% of the source count
+```
+
 ### Row Checksum Mode (`mode: row_checksum`, default)
 
 Compares row counts and checksums of all columns - detects any differences including modified values. `full` is accepted as a legacy spelling; the YAML writer emits `row_checksum`.
