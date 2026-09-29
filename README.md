@@ -43,9 +43,10 @@ sudo mv synq-recon /usr/local/bin/
 To pin a version instead, set `VERSION` by hand from the
 [releases page](https://github.com/getsynq/synq-recon/releases).
 
-Builds are published for macOS and Linux on both amd64 and arm64. Each archive
-also carries this README, `AGENTS.md` and the `examples/` suites, and every release
-ships a `checksums.txt` (`sha256sum -c checksums.txt --ignore-missing`).
+Builds are published for macOS and Linux on both amd64 and arm64, and for Windows
+on amd64 (see [Windows](#windows)). Each archive also carries this README,
+`AGENTS.md` and the `examples/` suites, and every release ships a `checksums.txt`
+(`sha256sum -c checksums.txt --ignore-missing`).
 
 Once installed, `synq-recon upgrade` does all of the above for you — see
 [Upgrading](#upgrading).
@@ -54,6 +55,22 @@ Every published binary is built with CGO enabled, so `type: duckdb` works — wh
 is what makes the examples runnable with no warehouse to stand up. On macOS a
 downloaded binary may be quarantined; `xattr -d com.apple.quarantine
 /usr/local/bin/synq-recon` clears the flag.
+
+### Windows
+
+Download `synq-recon_<version>_windows_amd64.zip` from the
+[releases page](https://github.com/getsynq/synq-recon/releases) and extract
+`synq-recon.exe` to a directory on your `PATH`. In PowerShell:
+
+```powershell
+Expand-Archive synq-recon_<version>_windows_amd64.zip -DestinationPath "$env:LOCALAPPDATA\synq-recon"
+$env:Path += ";$env:LOCALAPPDATA\synq-recon"   # this session; add it to your user PATH to keep it
+synq-recon --version
+```
+
+The Windows build is CGO-enabled like the others, so `type: duckdb` and the
+`examples/` suites work there too. `Get-FileHash -Algorithm SHA256 <archive>`
+gives the value to compare against `checksums.txt`.
 
 ### Docker
 
