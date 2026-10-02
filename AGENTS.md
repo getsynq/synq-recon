@@ -546,7 +546,9 @@ Four things govern how they behave:
   Segments that could not be split further, and aggregate groups present on only
   one side, are reported and skipped rather than silently dropped. An aggregate
   drill already visits every configured group column, so resuming one needs at
-  least one `--add-group-column`.
+  least one `--add-group-column`. A group whose recorded key matches no row on
+  either side, as a key recorded by an older release can, is reported and
+  skipped too, and a resume left with no group fails rather than passing.
 - **`recheck` re-runs only the reconciliations that did not pass.** `--all`
   re-runs every one.
 - **Credentials never come from an audit log** — it records connection *names*
