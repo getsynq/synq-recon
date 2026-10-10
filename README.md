@@ -765,6 +765,8 @@ Use `strategy: time` with `time_column` and `time_granularity` (hour, day, week,
 
 `detailed` additionally requires `reporting.consent_acknowledged: true`, and `sample_limit` caps how many rows either non-default level returns.
 
+`detailed` is for runs on your own machine. Coalesce Quality never reads row values, so it refuses to save, promote or run a suite that sets it: use `with_keys` or `count_only` for suites that run there.
+
 ## Audit Logs
 
 An audit log is the full record of a run — every query, timing, count, checksum and mismatch leaf — written as JSON by `--audit-log`. Its structure is the [AuditLog JSON schema](https://schemas.synq.io/synq-recon/v1/audit-log.schema.json), generated from the [`AuditLog` proto](https://github.com/getsynq/api/blob/main/protos/synq/agent/recon/v1/recon_audit.proto) — which is public, along with the rest of the API, at [getsynq/api](https://github.com/getsynq/api) and as [SDKs on buf](https://buf.build/getsynq/api/sdks). Reading one, and the field-casing difference between a local file and a log fetched from the workspace, are covered in [the operating guide](AGENTS.md) § Reading the output.
