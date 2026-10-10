@@ -355,6 +355,38 @@ findings are really a comparison window problem. Reach for these first.
 | Only the recent window matters | `window:` | Restricts the comparison to a lookback period: with a `column`, each table side is filtered on it; in a query, reference `{{window_start}}` / `{{window_end}}`. A cutoff on top of it reads its watermark from inside the window. |
 | Queries need a date or an id boundary | `variables:` | Resolved once, interpolated into both sides, recorded in the audit log. Override per run with `--var key=value`. |
 | Comparing against a point-in-time snapshot | `as_of:` | Time-travel query on platforms that support it. |
+| Numbers differ only past some decimal place (a loader rounds, a `FLOAT` sits next to a `DECIMAL`) | `comparison:` | `numeric_scale: <places>` rounds both sides to that many decimal places before hashing. Set it on the suite, on a reconciliation, or per column under `columns:`. |
+
+Without `comparison:`, a decimal column is compared at the scale both sides share and a
+floating-point one at the digits both sides hold. `numeric_scale: exact` is the opposite of
+a tolerance: a decimal is compared at its declared scale and the reconciliation fails if
+the two sides declare different scales, or if a side's scale is not known, rather than
+rounding either one. A floating-point column under `exact` is compared digit for digit,
+which only holds between two databases of the same kind, so across two different ones the
+run fails with a message saying so. The audit log records the precision each numeric
+column was compared at (`normalization.numeric_columns`), so a MATCH says what it was a
+match at.
+
+```yaml
+comparison:              # suite default
+  numeric_scale: 4
+reconciliations:
+  orders:
+    # ...
+    comparison:
+      numeric_scale: exact
+      columns:
+        - column: fx_rate   # the source-side name
+          numeric_scale: 8
+```
+
+`numeric_scale: <places>` rounds, half away from zero, so it is not a tolerance: `10.1249`
+and `10.1250` differ by far less than `0.01` and still round apart at two places.
+
+The most specific setting wins: a reconciliation's entry for the column, then its
+`numeric_scale`, then the suite's entry for the column, then the suite's `numeric_scale`.
+`comparison:` applies to `row_checksum` mode only. `check-config --db` reports a column
+`exact` cannot be compared at before a run does.
 
 ---
 
