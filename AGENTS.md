@@ -517,7 +517,9 @@ estimate support, so a gated run there simply emits no warnings.
 **Keep a local run local.** With a stored credential present, a locally executed
 run reports its results to Coalesce Quality so they appear in the workspace
 alongside backend runs — even when every database in the suite is local. It says
-so at `INFO`, naming the endpoint. Pass `--no-report` (or set `RECON_NO_REPORT`)
+so at `INFO`, naming the endpoint. After the upload it prints, to stderr, what
+Coalesce Quality says back about the stored run, such as a link to view it.
+Pass `--no-report` (or set `RECON_NO_REPORT`)
 to resolve no credential and open no connection at all.
 
 ---
