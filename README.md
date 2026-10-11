@@ -154,7 +154,7 @@ login covers all of them.
 | DuckDB     | Supported | Local files and MotherDuck cloud; local files need a CGO-enabled build |
 | Trino      | Supported | |
 | MSSQL      | Supported | SQL Server |
-| Oracle     | Supported | |
+| Oracle     | Supported | Rows longer than 4000 bytes need an optional grant, see [Checksum Algorithm](#checksum-algorithm) |
 | Athena     | Supported | |
 | Fabric     | Supported | Microsoft Fabric warehouse |
 
@@ -725,6 +725,18 @@ row_checksum = TRUNCATE_48_BITS(MD5(col1 || '|' || col2 || ...)) - 2^47
 ```
 
 The offset centering (`- 2^47`) prevents integer overflow when summing millions of checksums.
+
+On Oracle, `STANDARD_HASH` hashes a row of at most 4000 bytes of joined text. A longer row is hashed
+with `DBMS_CRYPTO`, which needs an optional grant on the connection's user:
+
+```sql
+GRANT EXECUTE ON SYS.DBMS_CRYPTO TO <user>;
+```
+
+Oracle grants it to no user by default, and synq-recon checks for it once per connection. Without it,
+rows of up to 4000 bytes compare as usual and a longer row fails the reconciliation with
+`ORA-01489` and a message naming the grant. Either way a row hashes to the same value as on every
+other database.
 
 Segment checksum is simply:
 ```
