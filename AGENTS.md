@@ -359,7 +359,8 @@ findings are really a comparison window problem. Reach for these first.
 | Numbers differ only past some decimal place (a loader rounds, a `FLOAT` sits next to a `DECIMAL`) | `comparison:` | `numeric_scale: <places>` rounds both sides to that many decimal places before hashing. Set it on the suite, on a reconciliation, or per column under `columns:`. |
 
 Without `comparison:`, a decimal column is compared at the scale both sides share and a
-floating-point one at the digits both sides hold. `numeric_scale: exact` is the opposite of
+floating-point one at the digits both sides hold, also when the other side is an integer
+or a decimal. `numeric_scale: exact` is the opposite of
 a tolerance: a decimal is compared at its declared scale and the reconciliation fails if
 the two sides declare different scales, or if a side's scale is not known, rather than
 rounding either one. A floating-point column under `exact` is compared digit for digit,
@@ -386,8 +387,9 @@ and `10.1250` differ by far less than `0.01` and still round apart at two places
 
 The most specific setting wins: a reconciliation's entry for the column, then its
 `numeric_scale`, then the suite's entry for the column, then the suite's `numeric_scale`.
-`comparison:` applies to `row_checksum` mode only. `check-config --db` reports a column
-`exact` cannot be compared at before a run does.
+`comparison:` applies to `row_checksum` mode only; set on a `row_count` or `aggregate`
+reconciliation, or on a suite with no `row_checksum` one, it is ignored with a warning.
+`check-config --db` reports a column `exact` cannot be compared at before a run does.
 
 ---
 
