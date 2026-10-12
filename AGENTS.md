@@ -147,7 +147,7 @@ deployment to inherit from, so an omitted `--drill` drills every mismatch whose
 reconciliation has `bisection.enabled` true, which is the default. Pass
 `--drill=false`. The reverse does not hold: `--drill` never drills a
 reconciliation with `bisection.enabled: false`, and neither does
-`run --auto-drill`; only `run-drill` does.
+`run --auto-drill`; only `run-drill` and `drill-deeper` do.
 
 **Do not put `NOW()`, `CURRENT_DATE` or `GETDATE()` in a query.** They evaluate
 at slightly different instants on the two sides, which manufactures differences
@@ -510,7 +510,7 @@ before you put one in a loop.
 | `check-config`, `plan` | None. Never connects. |
 | `check-config --db` | One planner call per query (`LIMIT 0`, no scan) plus a table-metadata sweep. |
 | `run-check` | One aggregate query per side. Scans the compared columns once. An `aggregate` reconciliation runs one grouped query per side per group column it descends into. |
-| `run-drill`, `run --auto-drill` | One bucketed query per bisection level per side. Cheap on mostly-identical data, expensive when most rows differ. |
+| `run-drill`, `run --auto-drill` | The highest key on each side, then for each segment it splits: a count and checksum per side, a boundary query on the source and one bucketed query per side. The first split uses the check's totals. Cheap on mostly-identical data, expensive when most rows differ. |
 | `recheck`, `drill-deeper` | Same as the stage they replay, but scoped to what the previous run left open — usually much cheaper than starting over. |
 | `upload-config`, `promote`, `suite …`, `deployment …`, `runs …`, `audit-logs …`, `entities …` | None. Workspace API only. |
 | `run-remote`, `trigger` | The run's cost, spent by the backend against workspace integrations. |
@@ -552,7 +552,10 @@ integrations for its connections, and these settings do not apply to it.
 run reports its results to Coalesce Quality so they appear in the workspace
 alongside backend runs — even when every database in the suite is local. It says
 so at `INFO`, naming the endpoint. A reported run never sends row values: at
-`detailed` they stay in the terminal and the `--audit-log` file. After the
+`detailed` they stay in the terminal and the `--audit-log` file. `detailed` is
+for local runs only: Coalesce Quality refuses to save, promote or run a suite
+that sets it, so use `with_keys` or `count_only` in a suite that runs in the
+workspace. After the
 upload it prints, to stderr, what Coalesce Quality says back about the stored
 run, such as a link to view it. Pass `--no-report` (or set `RECON_NO_REPORT`)
 to resolve no credential and open no connection at all.
