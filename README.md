@@ -777,7 +777,7 @@ Use `strategy: time` with `time_column` and `time_granularity` (hour, day, week,
 
 `detailed` additionally requires `reporting.consent_acknowledged: true`, and `sample_limit` caps how many rows either non-default level returns.
 
-`detailed` is for runs on your own machine. Coalesce Quality never reads row values, so it refuses to save, promote or run a suite that sets it: use `with_keys` or `count_only` for suites that run there.
+`detailed` is for runs on your own machine. Coalesce Quality never reads row values, so it refuses to save, promote or run a suite that sets it: use `with_keys` or `count_only` for suites that run there. A local `detailed` run that is reported to Coalesce Quality keeps its row values in the terminal output and the `--audit-log` file: the copy it sends carries each differing row's key, as `with_keys` does, without its values.
 
 ## Audit Logs
 

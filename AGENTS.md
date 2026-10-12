@@ -514,12 +514,28 @@ incur no extra queries. BigQuery and Snowflake report bytes; ClickHouse and
 PostgreSQL report planner rows; DuckDB, Athena and Databricks advertise no
 estimate support, so a gated run there simply emits no warnings.
 
+**Limit the load on one warehouse.** `--concurrency` sets how many
+reconciliations run at the same time. Each reconciliation queries both sides,
+and a drill can query many segments at the same time.
+`connections.<name>.parallelism` sets the maximum number of queries that a local
+run sends to that connection at the same time. The default is `8`.
+
+**Turn off a connection.** With `connections.<name>.disabled: true`, a local run
+does not run a reconciliation that uses that connection in a dataset, in setup
+or in teardown. The run also does not send the suite's setup and teardown to
+that connection. If `--include` names one of these reconciliations, the command
+fails.
+
+These two settings apply only to local runs. A suite in the workspace uses
+integrations for its connections, and these settings do not apply to it.
+
 **Keep a local run local.** With a stored credential present, a locally executed
 run reports its results to Coalesce Quality so they appear in the workspace
 alongside backend runs — even when every database in the suite is local. It says
-so at `INFO`, naming the endpoint. After the upload it prints, to stderr, what
-Coalesce Quality says back about the stored run, such as a link to view it.
-Pass `--no-report` (or set `RECON_NO_REPORT`)
+so at `INFO`, naming the endpoint. A reported run never sends row values: at
+`detailed` they stay in the terminal and the `--audit-log` file. After the
+upload it prints, to stderr, what Coalesce Quality says back about the stored
+run, such as a link to view it. Pass `--no-report` (or set `RECON_NO_REPORT`)
 to resolve no credential and open no connection at all.
 
 ---
