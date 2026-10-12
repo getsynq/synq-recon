@@ -59,8 +59,10 @@ column you chose is not indexed.
 
 **4. Compare — `run-check suite.yaml`**
 
-One query per side: total row count and checksum. Fast and cheap regardless of
-table size.
+Each reconciliation's own comparison, without a drill: the row count for
+`row_count`, the row count and checksum for `row_checksum` (one query per side,
+fast and cheap regardless of table size), and the grouped measures for
+`aggregate`.
 
 > If it reports `MATCH`, the datasets agree and you are done.
 > If it reports `MISMATCH`, go to step 5. Exit code 1 means "differences found",
@@ -141,8 +143,11 @@ drill a query narrowed to those groups.
 
 **Do not omit `--drill` on `run-remote` and expect no drill.** Unlike `promote`,
 where an omitted flag preserves the stored setting, an ad-hoc run has no
-deployment to inherit from, so an omitted `--drill` falls through to each
-reconciliation's own `bisection.enabled` in the YAML. Pass `--drill=false`.
+deployment to inherit from, so an omitted `--drill` drills every mismatch whose
+reconciliation has `bisection.enabled` true, which is the default. Pass
+`--drill=false`. The reverse does not hold: `--drill` never drills a
+reconciliation with `bisection.enabled: false`, and neither does
+`run --auto-drill`; only `run-drill` does.
 
 **Do not put `NOW()`, `CURRENT_DATE` or `GETDATE()` in a query.** They evaluate
 at slightly different instants on the two sides, which manufactures differences
@@ -374,7 +379,14 @@ comparison:              # suite default
   numeric_scale: 4
 reconciliations:
   orders:
-    # ...
+    source:
+      connection: gateway
+      table: public.orders
+    target:
+      connection: warehouse
+      table: ANALYTICS.PUBLIC.ORDERS
+    key_columns: [order_id]
+    mode: row_checksum
     comparison:
       numeric_scale: exact
       columns:
@@ -410,7 +422,9 @@ workspace commands (`suite`, `deployment`, `runs`, `audit-logs`, `connections`,
 quick-check document, then a plain-text banner, then one drill document per
 drilled reconciliation. To parse the results, run the two stages separately —
 `run-check -o json` then `run-drill -o json` — each of which is one valid
-document.
+document. A suite mixing modes is the exception: an `aggregate`
+reconciliation's results are an array of their own, printed after any
+quick-check document, so `--include` one mode at a time.
 
 ```bash
 # names that differ
@@ -435,8 +449,10 @@ out of its audit log without re-running anything — see
 **Exit codes.** Locally executed commands: `0` everything matched, `1`
 differences were found *or* the command failed. For `run-remote --wait` and
 `trigger --wait` the codes are data-driven and finer: `0` passed, `1` a
-`--fail-on` condition was met (default `mismatched,failed`), `2` the run itself
-failed. A run can succeed and still report a mismatch — that is the normal case.
+`--fail-on` status was reached (by default `mismatched` and `failed`), `2` the
+run itself failed. A run can succeed and still report a mismatch — that is the
+normal case. Give several statuses comma-separated or by repeating the flag
+(`--fail-on mismatched,within_threshold`); the list replaces the default.
 `--fail-on=passed` inverts the test for a "these should differ" canary.
 
 **Audit logs.** `--audit-log <path>` writes the full record of a run — every
@@ -493,7 +509,7 @@ before you put one in a loop.
 |---|---|
 | `check-config`, `plan` | None. Never connects. |
 | `check-config --db` | One planner call per query (`LIMIT 0`, no scan) plus a table-metadata sweep. |
-| `run-check` | One aggregate query per side. Scans the compared columns once. |
+| `run-check` | One aggregate query per side. Scans the compared columns once. An `aggregate` reconciliation runs one grouped query per side per group column it descends into. |
 | `run-drill`, `run --auto-drill` | One bucketed query per bisection level per side. Cheap on mostly-identical data, expensive when most rows differ. |
 | `recheck`, `drill-deeper` | Same as the stage they replay, but scoped to what the previous run left open — usually much cheaper than starting over. |
 | `upload-config`, `promote`, `suite …`, `deployment …`, `runs …`, `audit-logs …`, `entities …` | None. Workspace API only. |
@@ -624,7 +640,7 @@ invocation id (a local file has nothing server-side to reference) and accepts
 |---|---|
 | `check-config <file>` | Validate a suite. `--db` also connects, validates every query, and analyses tables. |
 | `plan <file>` | Print the resolved execution plan — the exact SQL each side will run — without executing it. |
-| `run-check <file>` | Stage 1: counts and checksums. |
+| `run-check <file>` | Stage 1: each reconciliation's own comparison (counts, checksums or aggregate measures), no drill. |
 | `run-drill <file>` | Stage 2: bisect to locate differences. `--depth`, `--threshold`. |
 | `run <file>` | Stage 1, then stage 2 on whatever mismatched with `--auto-drill`. |
 | `recheck <run>` | Re-execute a finished run's queries and report what changed. `--all`, `--drill`, `--reresolve`. |

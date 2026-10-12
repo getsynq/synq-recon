@@ -78,8 +78,10 @@ gives the value to compare against `checksums.txt`.
 docker pull europe-docker.pkg.dev/synq-cicd-public/synq-public/synq-recon:latest
 docker run --rm -v "$PWD:/work" -w /work \
   europe-docker.pkg.dev/synq-cicd-public/synq-public/synq-recon:latest \
-  check-config suite.yaml
+  synq-recon check-config suite.yaml
 ```
+
+The image's entrypoint is an init process, not the binary, so name `synq-recon` before the subcommand.
 
 The image is built with CGO enabled, so `type: duckdb` works inside it — which is what makes every example in `examples/` runnable from the image with no warehouse to stand up. If a DuckDB connection fails with a driver error, the image predates that: pull `:latest`.
 
@@ -298,7 +300,7 @@ reconciliations:
 
     # Bisection settings (for drill-down)
     bisection:
-      enabled: true
+      enabled: true     # false: runs never drill this one; run-drill still does (default: true)
       factor: 32        # Segments per bisection level (default: 32)
       threshold: 16384  # Stop drilling below this row count (default: 16384)
       strategy: auto    # Segmentation strategy: auto, quantile, hash, time
