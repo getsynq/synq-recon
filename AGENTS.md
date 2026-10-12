@@ -20,7 +20,8 @@ skip ahead, because every later step is more expensive than the one before it.
 **1. Validate offline — `check-config suite.yaml`**
 
 Parses the YAML, checks required fields, and warns about time-dependent SQL.
-Costs nothing, touches no database.
+It shows all the errors that it finds. Costs nothing, touches no
+database.
 
 > Move on when it prints `Configuration check passed!`. Fix errors here rather
 > than discovering them mid-run. Warnings about `NOW()` / `CURRENT_DATE` are
@@ -634,7 +635,7 @@ invocation id (a local file has nothing server-side to reference) and accepts
 | Command | What it does |
 |---|---|
 | `auth login` / `logout` / `status` / `token` / `whoami` | Browser login and credential inspection. `--region` picks the deployment; `--auth-profile` picks which credential profile to read or write; `--isolated` stores a credential for `synq-recon` alone rather than sharing it with the other Coalesce Quality CLIs. |
-| `upload-config <file>` | Save a suite to the workspace (Development). `--change-summary`. |
+| `upload-config <file>` | Save a suite to the workspace (Development). It copies the SQL of each `setup_file` and `teardown_file` into the suite. `--change-summary` (default: a summary that gives the file name). |
 | `suite list` / `get` / `yaml` / `versions` / `delete` / `bootstrap` | Manage stored suites. `yaml` renders one back to editable YAML; `bootstrap` prints a skeleton. `list` takes `--connection`, `--include-adhoc`, `--limit`. |
 | `connections remote list` / `bootstrap` | Inspect workspace integrations; generate a matching `.connections.yaml`. |
 | `entities search <text>` / `resolve <fqn>` | Find a table's physical `database.schema.table` in the workspace catalog. Optional — see § 4. |
