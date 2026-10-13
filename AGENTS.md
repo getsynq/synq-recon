@@ -362,6 +362,8 @@ findings are really a comparison window problem. Reach for these first.
 | Queries need a date or an id boundary | `variables:` | Resolved once, interpolated into both sides, recorded in the audit log. Override per run with `--var key=value`. |
 | Comparing against a point-in-time snapshot | `as_of:` | Time-travel query on platforms that support it. |
 | Numbers differ only past some decimal place (a loader rounds, a `FLOAT` sits next to a `DECIMAL`) | `comparison:` | `numeric_scale: <places>` rounds both sides to that many decimal places before hashing. Set it on the suite, on a reconciliation, or per column under `columns:`. |
+| Timestamps differ only past some fraction of a second (a loader cut them to the second) | `comparison:` | `timestamp_precision: second`, `millisecond` or `microsecond` cuts both sides to it, key columns included. |
+| Timestamps without a time zone are off by whole hours (a loader moved local wall clocks to UTC) | `comparison:` | `source_time_zone:` / `target_time_zone:` name the IANA zone (`Europe/Warsaw`) a side's wall clocks are in. |
 
 Without `comparison:`, a decimal column is compared at the scale both sides share and a
 floating-point one at the digits both sides hold, also when the other side is an integer
@@ -402,6 +404,39 @@ The most specific setting wins: a reconciliation's entry for the column, then it
 `comparison:` applies to `row_checksum` mode only; set on a `row_count` or `aggregate`
 reconciliation, or on a suite with no `row_checksum` one, it is ignored with a warning.
 `check-config --db` reports a column `exact` cannot be compared at before a run does.
+
+A timestamp is compared at the precision both sides hold, the coarser of the two, and
+between two different databases to the microsecond at most. That holds for a date or
+timestamp key column too: the drill splits on it like any key, and a source holding
+nanoseconds against a target holding microseconds puts each row in the same segment on
+both sides. `timestamp_precision:` overrides it, with `exact` comparing every digit
+both sides hold and failing the run when they hold different precisions.
+
+A timestamp without a time zone is compared as its wall clock, read as UTC. When a
+loader moved local wall clocks to UTC, or the other way round, name the zone each side's
+wall clocks are in, and both are compared as the instant they are:
+
+```yaml
+reconciliations:
+  loads:
+    source:
+      connection: gateway
+      table: dbo.loads
+    target:
+      connection: warehouse
+      table: ANALYTICS.PUBLIC.LOADS
+    key_columns: [load_ts, load_id]
+    mode: row_checksum
+    comparison:
+      timestamp_precision: millisecond
+      source_time_zone: Europe/Warsaw   # target_time_zone is not set: UTC
+```
+
+A timestamp with a time zone already says which instant it is, so a zone set for it is
+ignored with a warning. These settings are resolved like `numeric_scale`, the most
+specific first, and each side's zone on its own. A zone is converted by the database,
+so MySQL needs its time zone tables loaded, and Athena and Microsoft Fabric timestamps
+take neither setting.
 
 ---
 
