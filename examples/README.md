@@ -103,4 +103,4 @@ README for the full table with per-platform notes.
 - `INDEX.md` — Complete directory index and navigation
 - [the operating guide](../AGENTS.md) — driving the CLI: commands, flags, output, exit codes, cost
 - `../README.md` — What the tool is, and the configuration reference
-- `../CLAUDE.md` — Architecture, for changing `synq-recon` itself
+- `../AGENTS.md` — Architecture, for changing `synq-recon` itself
