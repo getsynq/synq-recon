@@ -261,6 +261,8 @@ reconciliations:
       query: |
         SELECT id, name, value FROM source_table
         WHERE created_at >= '2024-01-01'
+      # columns: [id, value]              # optional: compare only these columns of the result
+      # exclude_columns: [name]           # optional: compare every column of the result but these
       # Alternative: specify a table directly (mutually exclusive with query)
       # table: schema.source_table
       # columns: [id, name, value]        # optional: restrict columns

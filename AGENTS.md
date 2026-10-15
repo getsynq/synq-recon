@@ -264,10 +264,16 @@ Points that decide whether it works:
 - **`table:` beats `query:` when you can use it.** With `table:` the tool
   resolves the columns for you and you can narrow with `columns:`,
   `exclude_columns:` and `where:`. Reach for `query:` only when the comparison
-  genuinely needs SQL.
+  genuinely needs SQL. A `query:` side takes `columns:` and `exclude_columns:`
+  too, to compare part of what the query returns; a cutoff still filters the
+  query as written, so its column need not be among them. `where:` is for a
+  `table:` only, and a suite with one beside a `query:` does not load: put the
+  filter in the query.
 - **Key columns drive everything.** Bisection orders and range-filters on them,
   so they must be unique and, ideally, indexed. `check-config --db` suggests one
-  and warns if yours is not indexed.
+  and warns if yours is not indexed. Keep them among a side's `columns:` and out
+  of its `exclude_columns:`; the suite warns when a side leaves one out, because
+  a drill there fails as soon as it has a difference to locate.
 - **Modes.** `row_count` compares counts only (fastest, misses modified values,
   and takes a tolerance in `row_count.thresholds` for a replica that lags);
   `row_checksum` compares counts and a checksum of every column (the default,
@@ -286,7 +292,7 @@ Points that decide whether it works:
 - **Column names differing only in case match automatically.** For genuinely
   different names use `column_mapping`.
 - **Write names the way you would write them unquoted; quote only to pin one.**
-  Every part of a `table:` and every entry of its `columns:` is quoted for the
+  Every part of a `table:` and every entry of a side's `columns:` is quoted for the
   warehouse it runs on, so a table or column named after a reserved word
   (`order`, `group`) works as written. An unquoted name resolves the way the
   warehouse resolves an unquoted reference, `orders` is `ORDERS` on Snowflake
