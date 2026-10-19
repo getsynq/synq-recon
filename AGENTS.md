@@ -268,7 +268,9 @@ Points that decide whether it works:
   too, to compare part of what the query returns; a cutoff still filters the
   query as written, so its column need not be among them. `where:` is for a
   `table:` only, and a suite with one beside a `query:` does not load: put the
-  filter in the query.
+  filter in the query. An `exclude_columns:` entry matches a column in any
+  case, quoted or bare; the run warns about an entry that names no column,
+  since it excludes nothing.
 - **Key columns drive everything.** Bisection orders and range-filters on them,
   so they must be unique and, ideally, indexed. `check-config --db` suggests one
   and warns if yours is not indexed. Keep them among a side's `columns:` and out
