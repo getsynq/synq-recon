@@ -415,7 +415,8 @@ The most specific setting wins: a reconciliation's entry for the column, then it
 `numeric_scale`, then the suite's entry for the column, then the suite's `numeric_scale`.
 `comparison:` applies to `row_checksum` mode only; set on a `row_count` or `aggregate`
 reconciliation, or on a suite with no `row_checksum` one, it is ignored with a warning.
-`check-config --db` reports a column `exact` cannot be compared at before a run does.
+`check-config --db` reports every column `exact` cannot be compared at before a run does,
+where a run stops at the first.
 
 A timestamp is compared at the precision both sides hold, the coarser of the two, and
 between two different databases to the microsecond at most. That holds for a date or
