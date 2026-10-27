@@ -380,7 +380,11 @@ a tolerance: a decimal is compared at its declared scale and the reconciliation 
 the two sides declare different scales, or if a side's scale is not known, rather than
 rounding either one. A floating-point column under `exact` is compared digit for digit,
 which only holds between two databases of the same kind, so across two different ones the
-run fails with a message saying so. The audit log records the precision each numeric
+run fails with a message saying so. Between two databases of the same kind, `exact` is
+also the cheaper choice for a floating-point column: the default 15 digit form takes
+more work per value than the database's own text, and `exact` costs about the same as
+that text. Snowflake, Redshift and Db2 cannot compare a floating-point column exactly.
+The audit log records the precision each numeric
 column was compared at (`normalization.numeric_columns`), so a MATCH says what it was a
 match at.
 
