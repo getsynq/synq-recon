@@ -603,6 +603,40 @@ upload it prints, to stderr, what Coalesce Quality says back about the stored
 run, such as a link to view it. Pass `--no-report` (or set `RECON_NO_REPORT`)
 to resolve no credential and open no connection at all.
 
+**Keep local-only settings in a `local:` block.** One suite file can hold the
+fixtures and the `detailed` reporting you use on your computer, and still go to
+the workspace unchanged. Put `setup`, `setup_file`, `teardown`, `teardown_file`
+and `reporting` under `local:`, at the suite level or in a reconciliation:
+
+```yaml
+local:
+  setup_file:
+    test-db: fixtures/orders.sql
+  teardown:
+    test-db: DROP TABLE IF EXISTS orders
+reconciliations:
+  orders:
+    reporting:
+      level: with_keys
+    local:
+      reporting:
+        level: detailed
+        consent_acknowledged: true
+```
+
+`run`, `run-check`, `run-drill`, `check-config` and `plan` merge the block into
+the suite. A connection under `local.setup` or `local.teardown` replaces the
+queries of that connection outside the block, and the other connections keep
+theirs. A reporting field under `local.reporting` replaces the same field, and
+the fields it does not set keep their values. The suite's `local.reporting`
+applies to every reconciliation, and a reconciliation's own `local.reporting`
+takes precedence. `upload-config` does not send the block and does not read its
+files, and **Upload config** in the app drops it, so the workspace never runs
+your fixtures against its warehouse. `check-config` reports a problem in the
+block, such as an unknown connection or `detailed` without
+`consent_acknowledged`, with `local` in the message. Only these five settings
+are allowed in the block.
+
 ---
 
 ## 7. Investigating a finished run
@@ -699,7 +733,7 @@ invocation id (a local file has nothing server-side to reference) and accepts
 | Command | What it does |
 |---|---|
 | `auth login` / `logout` / `status` / `token` / `whoami` | Browser login and credential inspection. `--region` picks the deployment; `--auth-profile` picks which credential profile to read or write; `--isolated` stores a credential for `synq-recon` alone rather than sharing it with the other Coalesce Quality CLIs. |
-| `upload-config <file>` | Save a suite to the workspace (Development). It copies the SQL of each `setup_file` and `teardown_file` into the suite. `--change-summary` (default: a summary that gives the file name). |
+| `upload-config <file>` | Save a suite to the workspace (Development). It copies the SQL of each `setup_file` and `teardown_file` into the suite, and leaves out the `local:` blocks. `--change-summary` (default: a summary that gives the file name). |
 | `suite list` / `get` / `yaml` / `versions` / `delete` / `bootstrap` | Manage stored suites. `yaml` renders one back to editable YAML; `bootstrap` prints a skeleton. `list` takes `--connection`, `--include-adhoc`, `--limit`. |
 | `connections remote list` / `bootstrap` | Inspect workspace integrations; generate a matching `.connections.yaml`. |
 | `entities search <text>` / `resolve <fqn>` | Find a table's physical `database.schema.table` in the workspace catalog. Optional — see § 4. |
