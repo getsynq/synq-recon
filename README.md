@@ -136,7 +136,7 @@ Beyond local execution, the CLI manages the full lifecycle in a Coalesce Quality
 workspace: `upload-config` saves a suite, `run-remote` executes it on the backend
 against workspace integrations, `promote` publishes it as a scheduled or
 API-triggerable deployment, and `recheck` / `drill-deeper` replay a finished run.
-`auth login` authenticates; run `auth whoami` to confirm which workspace you are
+`auth login` authenticates (`auth login --coalesce` with your Coalesce account); run `auth whoami` to confirm which workspace you are
 acting on before anything that writes. Credential resolution order, scopes and
 the multi-region store are covered in [the operating guide](AGENTS.md) § Confirm the
 target. The credential store is shared with the other Coalesce Quality CLIs, so one

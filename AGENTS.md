@@ -199,6 +199,12 @@ picks up a developer's browser login:
 2. An API token — `QUALITY_TOKEN`.
 3. The browser login cached by `synq-recon auth login`, refreshed automatically.
 
+`synq-recon auth login --coalesce` signs in with your Coalesce account instead;
+add `--organization <org-id>` to skip choosing the organization. That credential
+carries your Coalesce Quality roles in the organization's workspace rather than
+the permissions below, and is otherwise used like any browser login: shared with
+the other Coalesce Quality CLIs and refreshed automatically.
+
 `--region eu|us|au` selects the deployment, and `--endpoint` (or
 `QUALITY_API_ENDPOINT`) points at a staging or self-hosted one. Both are root
 flags, so they work on every command. Whichever you use also selects *which
@@ -737,7 +743,7 @@ invocation id (a local file has nothing server-side to reference) and accepts
 
 | Command | What it does |
 |---|---|
-| `auth login` / `logout` / `status` / `token` / `whoami` | Browser login and credential inspection. `--region` picks the deployment; `--auth-profile` picks which credential profile to read or write; `--isolated` stores a credential for `synq-recon` alone rather than sharing it with the other Coalesce Quality CLIs. |
+| `auth login` / `logout` / `status` / `token` / `whoami` | Browser login and credential inspection. `--region` picks the deployment; `--auth-profile` picks which credential profile to read or write; `--isolated` stores a credential for `synq-recon` alone rather than sharing it with the other Coalesce Quality CLIs; `--coalesce` (with an optional `--organization`) logs in with a Coalesce account. |
 | `upload-config <file>` | Save a suite to the workspace (Development). It copies the SQL of each `setup_file` and `teardown_file` into the suite, and leaves out the `local:` blocks. `--change-summary` (default: a summary that gives the file name). |
 | `suite list` / `get` / `yaml` / `versions` / `delete` / `bootstrap` | Manage stored suites. `yaml` renders one back to editable YAML; `bootstrap` prints a skeleton. `list` takes `--connection`, `--include-adhoc`, `--limit`. |
 | `connections remote list` / `bootstrap` | Inspect workspace integrations; generate a matching `.connections.yaml`. |
