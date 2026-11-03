@@ -66,7 +66,8 @@ fast and cheap regardless of table size), and the grouped measures for
 
 > If it reports `MATCH`, the datasets agree and you are done.
 > If it reports `MISMATCH`, go to step 5. Exit code 1 means "differences found",
-> which is a result, not a failure.
+> which is a result, not a failure. Exit code 2 means a reconciliation could
+> not run: read its error before you compare anything.
 
 **5. Locate — `run suite.yaml --auto-drill`**
 
@@ -93,7 +94,8 @@ than against databases this machine can reach. Connections bind to integrations
 by name; override with `--map connection=integration_id`.
 
 > Move on when the run completes. `--wait` exits `0` if everything passed, `1`
-> if a `--fail-on` condition was hit, `2` if execution itself failed.
+> if a `--fail-on` condition was hit, `2` if execution itself failed, `3` if the
+> CLI got no answer (a refused credential, an expired `--wait-timeout`).
 > **Pass `--drill=false` explicitly if you do not want a drill** — omitting the
 > flag does not mean "off".
 
@@ -500,12 +502,19 @@ out of its audit log without re-running anything — see
 **Logs go to stderr, results to stdout.** Redirect with `2>/dev/null`, never
 `2>&1`, when piping `-o json`.
 
-**Exit codes.** Locally executed commands: `0` everything matched, `1`
-differences were found *or* the command failed. For `run-remote --wait` and
-`trigger --wait` the codes are data-driven and finer: `0` passed, `1` a
-`--fail-on` status was reached (by default `mismatched` and `failed`), `2` the
-run itself failed. A run can succeed and still report a mismatch — that is the
-normal case. Give several statuses comma-separated or by repeating the flag
+**Exit codes.** Each code has one meaning in every command:
+
+| Code | Meaning |
+|---|---|
+| `0` | Everything matched. For `run-remote --wait` and `trigger --wait`: no `--fail-on` status was reached. |
+| `1` | The data differs. For a waited remote run: a `--fail-on` status was reached (by default `mismatched` and `failed`). |
+| `2` | The run, or one of its reconciliations, could not run: a connection, a query, a timeout. |
+| `3` | The command itself failed before it had a result: a bad flag or config, a refused credential, an API error, an expired `--wait-timeout`. |
+
+A local run with both a difference and a failed reconciliation exits `2`, so
+`1` always means that every reconciliation produced a verdict. A remote run can
+succeed and still report a mismatch — that is the normal case. Give several
+`--fail-on` statuses comma-separated or by repeating the flag
 (`--fail-on mismatched,within_threshold`); the list replaces the default.
 `--fail-on=passed` inverts the test for a "these should differ" canary.
 
@@ -750,7 +759,7 @@ invocation id (a local file has nothing server-side to reference) and accepts
 | `entities search <text>` / `resolve <fqn>` | Find a table's physical `database.schema.table` in the workspace catalog. Optional — see § 4. |
 | `run-remote <suite-id>` | Ad-hoc backend run. `--drill`, `--map`, `--execution-timeout`, `--invocation-id`, `--wait`, `--fail-on`, `--wait-timeout`, `--poll-interval`. |
 | `promote <suite-id>` | Publish to Production. `--diff` previews and promotes nothing. `--schedule` (cron) or `--ical` (RFC 5545) with `--timezone` and optional `--dtstart`, plus `--triggerable-by-api`, `--drill`, `--execution-timeout`, `--map`, `--annotation`, `--category`, `--governance-category`, `--case-category`, `--case-governance-category`, `--clear-schedule`, `--deployment-id`, `--change-summary`. |
-| `trigger <suite-id>` | Run a promoted deployment on demand. `--drill`, `--execution-timeout`, `--wait`, `--fail-on`, `--deployment-id`. |
+| `trigger <suite-id>` | Run a promoted deployment on demand. `--drill`, `--execution-timeout`, `--invocation-id`, `--wait`, `--fail-on`, `--deployment-id`. The invocation id becomes the run id, and a retry with the same `--invocation-id` returns the run the first call started instead of starting another. |
 | `unpromote <suite-id>` | Deactivate a deployment; history is kept. `--reason`. |
 | `deployment list` / `get` / `history` / `update` / `pause` / `resume` / `set-annotations` / `set-categories` | Inspect and edit deployments in place. `update` takes the same schedule and run-setting flags as `promote`, plus `--clear`; `pause` takes `--until`; `set-categories` takes the four category flags. |
 | `runs list` / `cancel` | Inspect and cancel run state. `list` filters on `--status`, `--trigger`, `--suite`, `--deployment`, `--actor`, `--limit`. |

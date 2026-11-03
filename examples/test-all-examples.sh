@@ -56,11 +56,9 @@ for file in "${ALL_FILES[@]}"; do
 
     # Test 2: Run with auto-drill.
     #
-    # A file-level verdict (exit code alone) is too coarse: a reconciliation that
-    # errors out is masked by sibling reconciliations that mismatch, since both
-    # yield exit code 1. Assert per-reconciliation instead — parse the audit log
-    # and fail on any reconciliation left in FAILED status. Mismatches remain the
-    # expected, accepted outcome for these fixtures.
+    # Exit code 2 says that some reconciliation errored, and the audit log says
+    # which: fail on any reconciliation left in FAILED status. Mismatches remain
+    # the expected, accepted outcome for these fixtures.
     echo -n "  Running reconciliation... "
     AUDIT_FILE="$AUDIT_DIR/$(echo "$file" | tr '/' '_').json"
     # Exit code 1 (mismatches found) is expected here, so shield the capture from

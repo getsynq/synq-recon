@@ -131,6 +131,8 @@ synq-recon run          suite.yaml --auto-drill   # locate what differs
 ```
 
 Exit code 1 from a run means differences were found — a result, not a failure.
+Exit code 2 means a reconciliation could not run, and 3 that the command itself
+failed.
 
 Beyond local execution, the CLI manages the full lifecycle in a Coalesce Quality
 workspace: `upload-config` saves a suite, `run-remote` executes it on the backend

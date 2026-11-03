@@ -41,7 +41,8 @@ synq-recon run examples/ecommerce.yaml --auto-drill
 
 These examples run against in-memory DuckDB and every one of them is expected to
 find mismatches — that is what they demonstrate — so exit code 1 is the correct
-outcome, not a failure. Each reconciliation's `description` states what it should
+outcome, not a failure. Exit code 2 means a reconciliation could not run, which
+none of them should. Each reconciliation's `description` states what it should
 find.
 
 Add `--no-report` if you have a stored credential and want the run to stay off
