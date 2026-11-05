@@ -438,8 +438,9 @@ workspace never runs your fixtures.
 
 ## 7. Investigating a finished run
 
-`audit-logs queries`, `recheck` and `drill-deeper` take a finished run, not a
-suite. The run is a local audit log file or the invocation id of a stored run.
+To get the SQL queries of a finished reconciliation run back, or to replay the
+run, use `audit-logs queries`, `recheck` and `drill-deeper`. They take a finished
+run, not a suite: a local audit log file or the invocation id of a stored run.
 
 ### Getting the SQL back
 
