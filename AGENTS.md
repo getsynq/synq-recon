@@ -1,232 +1,163 @@
 # Driving `synq-recon`
 
-This is the operating guide for a coding agent using `synq-recon` to author,
-validate, run, promote and investigate a reconciliation suite: the loop to
-follow, the mistakes that cost real time, how to read the output, and what each
-command spends. It is written to be acted on top-down.
+This guide tells a coding agent how to use `synq-recon` on a reconciliation
+suite. Read it from the top down.
 
-A **reconciliation** compares one dataset in a source database against one in a
-target database and reports whether they agree. A **suite** is a YAML file
-holding several reconciliations plus the connections they use. Only counts and
-checksums leave the database by default — no row values.
+A **reconciliation** compares one dataset in a source database with one dataset
+in a target database. A **suite** is a YAML file with several reconciliations
+and their connections. By default, only counts and checksums leave the
+database, never row values.
 
 ---
 
 ## 1. The loop
 
-Work through these in order. Each step has a condition for moving on; do not
-skip ahead, because every later step is more expensive than the one before it.
+Do these steps in order. Do not skip a step, because each step costs more than
+the step before it.
 
-**1. Validate offline — `check-config suite.yaml`**
+### Step 1: validate offline with `check-config suite.yaml`
 
-Parses the YAML, checks required fields, and warns about time-dependent SQL.
-It shows all the errors that it finds. Costs nothing, touches no
-database.
+The command checks the YAML and warns about time-dependent SQL. It connects to
+no database. Continue when it prints `Configuration check passed!`. A warning
+about `NOW()` or `CURRENT_DATE` is real, see [Never do these](#2-never-do-these).
 
-> Move on when it prints `Configuration check passed!`. Fix errors here rather
-> than discovering them mid-run. Warnings about `NOW()` / `CURRENT_DATE` are
-> real — see [Never do these](#2-never-do-these).
+### Step 2: read the plan with `plan suite.yaml`
 
-**2. Read what it will do — `plan suite.yaml`**
+The command prints the exact SQL of each side after variables, table references
+and time-travel snapshots resolve. It connects to no database. Continue when the
+SQL is the SQL you meant. This is the cheapest place to find a wrong date or a
+wrong schema. Values that a run derives from live data, such as a cutoff
+watermark, are named but not resolved.
 
-Prints the resolved execution plan: every reconciliation the run covers, which
-connection each side uses, and the exact SQL both sides will execute after
-template variables, table references and time-travel snapshots resolve. Costs
-nothing, touches no database.
+### Step 3: validate against the databases with `check-config suite.yaml --db`
 
-> Move on when the quoted SQL is the SQL you meant to run. This is the cheapest
-> place to catch a variable that resolved to the wrong date or a table reference
-> pointing at the wrong schema — both of which otherwise surface as a confusing
-> `MISMATCH` after you have paid for the scan.
->
-> Values a run derives from live data — a cutoff watermark, the boundaries a
-> drill picks — are named but not resolved; deriving them needs a query.
+The command sends each query to the query planner (`LIMIT 0`). It reports the
+columns, the table size, the keys and a suggested key column, and warns when
+your key column has no index. Continue when every connection is `OK` and every
+query validates. `--db` does not run the `setup:` SQL. If `setup` creates the
+tables, every query fails here, so go to step 4.
 
-**3. Validate against the databases — `check-config suite.yaml --db`**
+### Step 4: compare with `run-check suite.yaml`
 
-Connects to every connection, runs each query through the database's query
-planner (`LIMIT 0`), and reports the resolved columns. It also reports table
-size, primary/partition keys, a suggested key column, and warns when the key
-column you chose is not indexed.
+The command compares each reconciliation without a drill, with one query per
+side. If it reports `MATCH`, the datasets agree and you are done. If
+it reports `MISMATCH`, go to step 5. Exit code 1 is a result, not a failure.
+Exit code 2 means that a reconciliation could not run, so read its error first.
 
-> Move on when every connection is `OK` and every query validates. A failure
-> here is a wrong table name, a missing grant, or a column that does not exist —
-> all of which would otherwise surface as a confusing mid-run error.
->
-> `--db` does **not** run the suite's `setup:` SQL, so a suite whose tables are
-> created by `setup` will report every query as failed. That is expected; skip
-> to step 4 for such suites.
+### Step 5: locate with `run suite.yaml --auto-drill`
 
-**4. Compare — `run-check suite.yaml`**
+The command runs the check, then bisects the key space of each mismatch to find
+the key ranges that differ. `run-drill` does the same without the check.
+Continue when the drill reports usable key ranges. If it reports thousands of
+leaves, stop and read [Never do these](#2-never-do-these).
 
-Each reconciliation's own comparison, without a drill: the row count for
-`row_count`, the row count and checksum for `row_checksum` (one query per side,
-fast and cheap regardless of table size), and the grouped measures for
-`aggregate`.
+### Step 6: save to the workspace with `upload-config suite.yaml`
 
-> If it reports `MATCH`, the datasets agree and you are done.
-> If it reports `MISMATCH`, go to step 5. Exit code 1 means "differences found",
-> which is a result, not a failure. Exit code 2 means a reconciliation could
-> not run: read its error before you compare anything.
+Run `auth whoami` first. The command stores a version of the suite in your
+Coalesce Quality workspace, under **Development**, and prints the suite id.
 
-**5. Locate — `run suite.yaml --auto-drill`**
+### Step 7: run on the backend with `run-remote <suite-id> --wait`
 
-Runs the quick check, then bisects the key space on whatever mismatched to
-narrow the difference to specific key ranges. `run-drill` does the same without
-re-running the quick check.
+Coalesce Quality runs the suite against the workspace integrations. Connections
+bind to integrations by name, or explicitly with
+`--map connection=integration_id`. Pass `--drill=false` if you do not want a
+drill.
 
-> Move on when the drill reports mismatch leaves with usable key ranges. If it
-> reports thousands of leaves, stop and read
-> [Never do these](#2-never-do-these) — you are drilling something that should
-> be localised with an aggregate comparison first.
+### Step 8: publish to production with `promote <suite-id>`
 
-**6. Save to the workspace — `upload-config suite.yaml`**
+The command creates a deployment: a snapshot of the suite and an optional
+schedule. Its results become assets, checks and issues. If you edit the suite,
+production does not change until you promote again. Run `promote --diff` first,
+see [Editing a deployment](#editing-a-deployment).
 
-Stores and versions the suite in your Coalesce Quality workspace, where it
-appears under **Development**. Requires `SCOPE_RECON_EDIT`.
+### After a run
 
-> Run `auth whoami` first. Move on when it prints the suite id.
-
-**7. Run it on the backend — `run-remote <suite-id> --wait`**
-
-Executes the suite in Coalesce Quality against workspace integrations rather
-than against databases this machine can reach. Connections bind to integrations
-by name; override with `--map connection=integration_id`.
-
-> Move on when the run completes. `--wait` exits `0` if everything passed, `1`
-> if a `--fail-on` condition was hit, `2` if execution itself failed, `3` if the
-> CLI got no answer (a refused credential, an expired `--wait-timeout`).
-> **Pass `--drill=false` explicitly if you do not want a drill** — omitting the
-> flag does not mean "off".
-
-**8. Publish to production — `promote <suite-id>`**
-
-Creates a deployment: an immutable snapshot of the suite plus an optional
-schedule, so it runs on its own and its results become platform assets, checks
-and issues. Requires `SCOPE_RECON_PROMOTE`.
-
-> A deployment is a snapshot, not a pointer: editing the suite afterwards
-> changes nothing in production until you re-promote. Re-promoting preserves
-> settings you omit; a *fresh* promote applies defaults, and the drill default
-> on a fresh promote is **on**.
->
-> Run `promote <suite-id> --diff` with the same flags first — it shows what
-> would change in production and promotes nothing.
-
-**Any time after a run:** `recheck <run>` re-executes what it ran and reports
-what moved; `drill-deeper <run>` continues its drill from where it stopped. Both
-take a local audit-log file or the invocation id of a stored run. See
+`recheck <run>` runs the same queries again and reports what changed.
+`drill-deeper <run>` continues the drill, see
 [Investigating a finished run](#7-investigating-a-finished-run).
 
 ---
 
 ## 2. Never do these
 
-Each of these has already cost someone real time.
-
-**Do not hand-query the warehouse to "check something first."** Express the
-question as a reconciliation and let `synq-recon` run it — that way the result
-is recorded, reproducible, and comparable to the next run. If the tool cannot
-express what you need, that is a bug worth reporting, not a reason to open a SQL
-client.
-
-**Do not commit `.connections.yaml`, or any credential, ever.** Keep the real
-file git-ignored and commit only a `.connections.yaml.example` whose values are
-`${ENV_VAR}` placeholders. A suite YAML with a literal secret in it is also a
-suite you cannot safely `upload-config`.
-
-**Do not run a threshold-1 drill over a table with tens of thousands of genuine
-differences.** Bisection is O(log n) when the data is *mostly* identical; when
-most rows differ it cannot halve, and it degenerates into thousands of queries
-that each rescan a large slice of the table. Localise first: an aggregate
-comparison (`mode: aggregate`, a `COUNT` measure grouped by the natural
-partition) tells you *which* groups diverge in roughly one query per side. Then
-drill a query narrowed to those groups.
-
-**Do not omit `--drill` on `run-remote` and expect no drill.** Unlike `promote`,
-where an omitted flag preserves the stored setting, an ad-hoc run has no
-deployment to inherit from, so an omitted `--drill` drills every mismatch whose
-reconciliation has `bisection.enabled` true, which is the default. Pass
-`--drill=false`. The reverse does not hold: `--drill` never drills a
-reconciliation with `bisection.enabled: false`, and neither does
-`run --auto-drill`; only `run-drill` and `drill-deeper` do.
-
-**Do not put `NOW()`, `CURRENT_DATE` or `GETDATE()` in a query.** They evaluate
-at slightly different instants on the two sides, which manufactures differences
-that are not there. Use a template variable, resolved once and interpolated into
-both sides:
-
-```yaml
-variables:
-  start_date: "{{ today - 7d }}"
-  end_date: "{{ today }}"
-```
-
-`check-config` warns about this; `strict_time_references: true` makes it an
-error.
-
-**Do not synthesise a concatenated key.** For a multi-column natural key, declare
-`key_columns: [workspace, path]`. Bisection then orders and range-filters on the
-column *tuple*, so a matching primary key or index still prunes each segment. A
-synthetic `a || '|' || b` key cannot use the index and forces a full scan per
-segment.
-
-**Do not compare a lagging replica without a cutoff.** If the target trails the
-source, rows still in flight look like missing rows. A `cutoff:` derives a
-watermark from the data itself and filters both sides to at-or-below it. See
-[Cutoffs](#avoiding-false-differences).
+- Do not query the warehouse by hand to "check something first". Write the
+  question as a reconciliation, so that the result is recorded and
+  reproducible. If the tool cannot express it, report a bug.
+- Do not commit `.connections.yaml` or any credential. Keep the real file in
+  `.gitignore`. Commit only a `.connections.yaml.example` with `${ENV_VAR}`
+  placeholders. Do not `upload-config` a suite that holds a literal secret.
+- Do not run a drill with threshold 1 on a table with tens of thousands of real
+  differences. Bisection is O(log n) only when most rows are identical. When
+  most rows differ, it sends thousands of queries that each scan a large part
+  of the table. First find the groups that differ with an aggregate comparison
+  (`mode: aggregate`, a `COUNT` measure grouped by the natural partition). Then
+  drill a query that reads only those groups.
+- Do not omit `--drill` on `run-remote` if you want no drill. An ad hoc run has
+  no deployment to inherit from, so it drills every mismatch whose
+  reconciliation has `bisection.enabled: true`, the default. Pass
+  `--drill=false`. Only `run-drill` and `drill-deeper` drill a reconciliation
+  with `bisection.enabled: false`.
+- Do not put `NOW()`, `CURRENT_DATE` or `GETDATE()` in a query. The two sides
+  evaluate them at different instants, which makes false differences. Use a
+  template variable such as `{{ today - 7d }}`, which resolves once for both
+  sides. `strict_time_references: true` makes the `check-config` warning an
+  error.
+- Do not make a concatenated key such as `a || '|' || b`. It cannot use an
+  index, so each segment scans the full table. Write
+  `key_columns: [workspace, path]`, and bisection filters on the column tuple.
+- Do not compare a replica that lags without a `cutoff:`, see
+  [Avoiding false differences](#avoiding-false-differences).
 
 ---
 
 ## 3. Confirm the target before any mutation
 
-Every command that writes to a workspace — `upload-config`, `promote`,
-`unpromote`, `trigger`, `run-remote`, `deployment …`, `suite delete`,
-`runs cancel` — acts on whichever workspace your credential resolves to.
+Each command that writes to a workspace acts on the workspace of your
+credential: `upload-config`, `promote`, `unpromote`, `trigger`, `run-remote`,
+`deployment …`, `suite delete` and `runs cancel`.
 
 ```bash
 synq-recon auth whoami
 ```
 
-Read the `workspace:` line and confirm it is the one you mean **before** the
-mutation, not after. There is deliberately no `--workspace` override: your
-credential determines the target, so the way to change it is to change the
+Before the mutation, read the `workspace:` line and confirm it is the correct
+workspace. There is no `--workspace` flag. To change the target, change the
 credential.
 
-Credentials resolve in a fixed order, so an automated pipeline never silently
-picks up a developer's browser login:
+### Credential order
 
-1. Client credentials — `--client-id` / `--client-secret`, or
-   `QUALITY_CLIENT_ID` / `QUALITY_CLIENT_SECRET`, or the `synq:` block in the suite.
-2. An API token — `QUALITY_TOKEN`.
-3. The browser login cached by `synq-recon auth login`, refreshed automatically.
+The CLI uses the first credential it finds, so an automated pipeline never uses
+the browser login of a developer:
 
-`synq-recon auth login --coalesce` signs in with your Coalesce account instead;
-add `--organization <org-id>` to skip choosing the organization. That credential
-carries your Coalesce Quality roles in the organization's workspace rather than
-the permissions below, and is otherwise used like any browser login: shared with
-the other Coalesce Quality CLIs and refreshed automatically.
+1. Client credentials: `--client-id` / `--client-secret`, or
+   `QUALITY_CLIENT_ID` / `QUALITY_CLIENT_SECRET`, or the `synq:` block of the
+   suite.
+2. An API token: `QUALITY_TOKEN`.
+3. The browser login from `synq-recon auth login`. The CLI refreshes it
+   automatically.
 
-`--region eu|us|au` selects the deployment, and `--endpoint` (or
-`QUALITY_API_ENDPOINT`) points at a staging or self-hosted one. Both are root
-flags, so they work on every command. Whichever you use also selects *which
-region's* stored credential is used — a token minted for one region is never
-sent to another.
+To log in with a Coalesce account, see `synq-recon auth login --help`. That
+credential carries your Coalesce Quality roles, not the permissions below.
 
-You rarely need either: `synq-recon auth login --region au` records the
-deployment, and later commands resolve to it. `synq-recon auth use <region>`
-switches between deployments you are already logged in to, and
-`auth use --clear` goes back to the default (`eu`). Resolution order is
-`--endpoint` > `--region` > the suite's `synq.endpoint` > `QUALITY_API_ENDPOINT`
-> `QUALITY_REGION` > the last login > `eu`.
+The `--synq-` flags and the `SYNQ_` environment variables are older spellings
+and still work.
 
-The `--synq-`-prefixed flags and `SYNQ_`-prefixed variables are the previous
-spellings and still work.
+### Region and endpoint
 
-Permissions: `SCOPE_RECON_READ` to inspect, `SCOPE_RECON_EDIT` for
-`upload-config`, suite edits and reporting a locally executed run's results,
-`SCOPE_RECON_PROMOTE` to promote or trigger. All three can be granted to a
-workspace API client, so every command works unattended.
+`--region eu|us|au` and `--endpoint` (or `QUALITY_API_ENDPOINT`, for staging or
+self-hosted) are root flags. They also select the stored credential of that
+region, and a token never goes to another region. Usually you need neither:
+`auth login --region au` records the deployment for later commands, and
+`auth use <region>` or `auth use --clear` changes it. The order is
+`--endpoint`, `--region`, the `synq.endpoint` of the suite,
+`QUALITY_API_ENDPOINT`, `QUALITY_REGION`, the last login, then `eu`.
+
+### Permissions
+
+`SCOPE_RECON_READ` lets you inspect. `SCOPE_RECON_EDIT` lets you
+`upload-config`, edit suites and report the results of a local run.
+`SCOPE_RECON_PROMOTE` lets you promote and trigger. A workspace API client can
+have all three, so every command works without a person.
 
 ---
 
@@ -267,265 +198,155 @@ reconciliations:
     mode: row_checksum
 ```
 
-Points that decide whether it works:
-
-- **`table:` beats `query:` when you can use it.** With `table:` the tool
-  resolves the columns for you and you can narrow with `columns:`,
-  `exclude_columns:` and `where:`. Reach for `query:` only when the comparison
-  genuinely needs SQL. A `query:` side takes `columns:` and `exclude_columns:`
-  too, to compare part of what the query returns; a cutoff still filters the
-  query as written, so its column need not be among them. `where:` is for a
-  `table:` only, and a suite with one beside a `query:` does not load: put the
-  filter in the query. An `exclude_columns:` entry matches a column in any
-  case, quoted or bare; the run warns about an entry that names no column,
-  since it excludes nothing.
-- **Key columns drive everything.** Bisection orders and range-filters on them,
-  so they must be unique and, ideally, indexed. `check-config --db` suggests one
-  and warns if yours is not indexed. Keep them among a side's `columns:` and out
-  of its `exclude_columns:`; the suite warns when a side leaves one out, because
-  a drill there fails as soon as it has a difference to locate.
-- **Modes.** `row_count` compares counts only (fastest, misses modified values,
-  and takes a tolerance in `row_count.thresholds` for a replica that lags);
-  `row_checksum` compares counts and a checksum of every column (the default,
-  catches any difference); `aggregate` compares grouped measures like `SUM` and
-  `COUNT` with a tolerance, and drills down through a `group_columns` hierarchy.
-  With no `group_columns`, it groups by the key columns; with no key columns
-  either, it compares the whole dataset as one group.
-  `full` is an accepted legacy spelling of `row_checksum`; write `row_checksum`.
-- **The two sides need the same number of columns — except in `row_count`.** The
-  checksum modes hash the compared columns position by position, so a wider
-  target fails with `source has N columns but target has M columns`. Narrow both
-  sides with `columns:`, or drop the extras with `exclude_columns:` on the wider
-  side. `row_count` reads no column at all and compares whatever the two sides
-  are, so a target with extra columns needs no column list; only the key columns
-  have to exist on both sides.
-- **Column names differing only in case match automatically.** For genuinely
-  different names use `column_mapping`.
-- **Write names the way you would write them unquoted; quote only to pin one.**
-  Every part of a `table:` and every entry of a side's `columns:` is quoted for the
-  warehouse it runs on, so a table or column named after a reserved word
-  (`order`, `group`) works as written. An unquoted name resolves the way the
-  warehouse resolves an unquoted reference, `orders` is `ORDERS` on Snowflake
-  and `orders` on Postgres. To name an object created with quotes, a
-  lower-case Snowflake table or a name with a dot in it, quote that part
-  yourself: `table: 'DB.SCH."events"'`. The outer single quotes are YAML's,
-  because a value starting with `"` is not a plain string. Column names in
-  `key_columns`, `column_mapping` and `cutoff:` are looked up in what the
-  warehouse reports, ignoring case, so `last_updated_date_time` finds a
-  Snowflake column `LAST_UPDATED_DATE_TIME`.
-  A `cutoff.offset` or `window.lookback` is a whole number and one of `s`, `m`,
-  `h`, `d`, `w`, or a Go duration such as `1h30m`. An offset is signed and
-  usually negative (`-15m`, `-900s`); a lookback is how far back to look, so it
-  is positive (`14d`) — a zero or negative one is ignored, with a warning.
-- **Keep credentials out of the suite.** Put them in a git-ignored
-  `.connections.yaml` (auto-discovered, or passed with `--connections`) keyed by
-  the same connection names. This is also what lets the same suite run locally
-  and in the workspace, where the names bind to integrations instead.
-
-### Finding the physical table path
-
-Both sides of a reconciliation are named by their physical
-`database.schema.table`, and on a warehouse whose naming you do not control
-that is the part you may not know. If the warehouse is connected to your
-workspace as an integration, ask the catalog:
-
-```bash
-# By name — description and column text are searched too
-synq-recon entities search orders --type snowflake_table
-
-# By a name you already have, to find which warehouse it is in
-synq-recon entities resolve ANALYTICS.PUBLIC.ORDERS
-```
-
-Both print the SQL-addressable `database`, `schema` and `table` — exactly what
-goes into a `table:` block — plus the dialect and connection id, which is how
-you tell apart the several warehouses one `db.schema.table` can legitimately
-match.
-
-**This is a convenience and never a prerequisite.** The catalog holds only
-warehouses connected to the workspace as integrations, so a database you
-reconcile locally — a DuckDB file, a container, anything reachable from this
-machine but never integrated — will not appear, and that says nothing about
-whether a suite naming it runs. Nothing else in this tool consults the catalog:
-`check-config`, `plan` and every run command work entirely from the suite and
-its connections file, with or without a workspace.
-
-The exhaustive field list is the published schema, at a stable versioned URL:
-
-- [Configuration reference](https://schemas.synq.io/synq-recon/v1/config.html) —
-  every field, type, constraint and default, rendered.
-- [`config.schema.json`](https://schemas.synq.io/synq-recon/v1/config.schema.json)
-  — the machine-readable form. Point your editor at it for completion and
-  validation:
+[Authoring suites](https://docs.synq.io/reconciliation/authoring-suites) and
+[Comparison modes](https://docs.synq.io/reconciliation/comparison-modes) explain
+each part. The [Configuration reference](https://schemas.synq.io/synq-recon/v1/config.html)
+lists every field, type and default. For completion and validation in your
+editor, point it at the schema:
 
 ```yaml
 # yaml-language-server: $schema=https://schemas.synq.io/synq-recon/v1/config.schema.json
 ```
 
-One field there is not yours to set: `motherduck_account` appears under the
-DuckDB connection because the loader populates it internally. Write `database:`
-with the MotherDuck account name, and pass `motherduck_token`.
+### Rules that decide if a suite works
+
+- Use `table:` when you can. The tool then finds the columns, and you can narrow
+  with `columns:`, `exclude_columns:` and `where:`. Use `query:` only when the
+  comparison needs SQL. A `query:` takes `columns:` and `exclude_columns:` too.
+  A cutoff filters the query as written, so its column need not be in
+  `columns:`. `where:` is for a `table:` only. A suite with `where:` beside a
+  `query:` does not load, so put the filter in the query.
+- `exclude_columns:` matches a name in any case, quoted or bare. The run warns
+  about an entry that matches no column, because it excludes nothing.
+- Key columns must be unique and should have an index, because bisection sorts
+  and filters on them. Keep them in the `columns:` of each side and out of
+  `exclude_columns:`. If a side leaves a key column out, the drill fails at the
+  first difference.
+- Each mode except `row_count` needs the same number of columns on both sides,
+  because the checksum hashes the columns by position. A wider target fails with
+  `source has N columns but target has M columns`. Narrow both sides with
+  `columns:`, or remove the extra columns with `exclude_columns:`. `row_count`
+  reads no columns, so it needs only the key columns on both sides.
+- Names that differ only in case match automatically. For other names, use
+  `column_mapping`.
+- Write a name as you write it unquoted, and quote only to pin it. The tool
+  quotes each part of `table:` and each entry of `columns:` for its warehouse,
+  so a reserved word such as `order` works. An unquoted name resolves as the
+  warehouse resolves it: `orders` is `ORDERS` on Snowflake and `orders` on
+  Postgres. For a name created with quotes, quote that part:
+  `table: 'DB.SCH."events"'`. The outer single quotes are YAML syntax.
+  `key_columns`, `column_mapping` and `cutoff:` match column names in any case.
+- Keep credentials in `.connections.yaml`, keyed by the connection names. The
+  CLI finds it automatically, or you pass `--connections`. In the workspace, the
+  same names bind to integrations, so one suite runs in both places.
+- Do not set `motherduck_account`, the CLI sets it. Write the MotherDuck
+  account name in `database:`, and pass `motherduck_token`.
+
+### Finding the physical table path
+
+If the warehouse is an integration of your workspace, the catalog finds the
+physical `database.schema.table` of a side:
+
+```bash
+synq-recon entities search orders --type snowflake_table
+synq-recon entities resolve ANALYTICS.PUBLIC.ORDERS
+```
+
+Both print the `database`, `schema` and `table`, and the dialect and connection
+id, to choose between warehouses with the same name. The catalog is optional. A
+DuckDB file or a local container is not in it, and no other command reads it.
 
 ### Avoiding false differences
 
-Comparing two live systems is a moving target, and most "the data is wrong"
-findings are really a comparison window problem. Reach for these first.
+Most "the data is wrong" findings are a problem with the comparison window. Try
+these first. [Time windows and cutoffs](https://docs.synq.io/reconciliation/time-windows-and-cutoffs)
+explains `cutoff:`, `window:` and `variables:`.
 
 | Symptom | Use | What it does |
 |---|---|---|
-| Target lags the source; the tail looks "missing" | `cutoff:` | Derives a watermark from the data on each side, combines them (`min` by default — the point both sides have certainly reached), optionally truncates and offsets it, and filters both sides to at-or-below it. |
-| Only the recent window matters | `window:` | Restricts the comparison to a lookback period: with a `column`, each table side is filtered on it; in a query, reference `{{window_start}}` / `{{window_end}}`. A cutoff on top of it reads its watermark from inside the window. |
-| Queries need a date or an id boundary | `variables:` | Resolved once, interpolated into both sides, recorded in the audit log. Override per run with `--var key=value`. |
-| Comparing against a point-in-time snapshot | `as_of:` | Time-travel query on platforms that support it. |
-| Numbers differ only past some decimal place (a loader rounds, a `FLOAT` sits next to a `DECIMAL`) | `comparison:` | `numeric_scale: <places>` rounds both sides to that many decimal places before hashing. Set it on the suite, on a reconciliation, or per column under `columns:`. |
-| Timestamps differ only past some fraction of a second (a loader cut them to the second) | `comparison:` | `timestamp_precision: second`, `millisecond` or `microsecond` cuts both sides to it, key columns included. |
-| Timestamps without a time zone are off by whole hours (a loader moved local wall clocks to UTC) | `comparison:` | `source_time_zone:` / `target_time_zone:` name the IANA zone (`Europe/Warsaw`) a side's wall clocks are in. |
+| The target lags the source, so the newest rows look missing | `cutoff:` | Finds a watermark in the data (`min` of the two sides by default) and filters both sides to it. |
+| Only a recent period matters | `window:` | Compares a lookback period. In a query, use `{{window_start}}` / `{{window_end}}`. |
+| Queries need a date or id boundary | `variables:` | Resolves once, goes into both sides. Override with `--var key=value`. |
+| You compare with a snapshot at a point in time | `as_of:` | Sends a time-travel query. |
+| Numbers differ only after some decimal place | `comparison:` | `numeric_scale: <places>` rounds both sides. |
+| Timestamps differ only in fractions of a second | `comparison:` | `timestamp_precision: second` (or `millisecond`, `microsecond`) cuts both sides. |
+| Timestamps without a time zone differ by whole hours | `comparison:` | `source_time_zone:` / `target_time_zone:` give the IANA zone of the wall clocks of a side. |
 
-Without `comparison:`, a decimal column is compared at the scale both sides share and a
-floating-point one at the digits both sides hold, also when the other side is an integer
-or a decimal. `numeric_scale: exact` is the opposite of
-a tolerance: a decimal is compared at its declared scale and the reconciliation fails if
-the two sides declare different scales, or if a side's scale is not known, rather than
-rounding either one. A floating-point column under `exact` is compared digit for digit,
-which only holds between two databases of the same kind, so across two different ones the
-run fails with a message saying so. Between two databases of the same kind, `exact` is
-also the cheaper choice for a floating-point column: the default 15 digit form takes
-more work per value than the database's own text, and `exact` costs about the same as
-that text. Snowflake, Redshift and Db2 cannot compare a floating-point column exactly.
-The audit log records the precision each numeric
-column was compared at (`normalization.numeric_columns`), so a MATCH says what it was a
-match at.
+### Numeric and timestamp precision
 
-```yaml
-comparison:              # suite default
-  numeric_scale: 4
-reconciliations:
-  orders:
-    source:
-      connection: gateway
-      table: public.orders
-    target:
-      connection: warehouse
-      table: ANALYTICS.PUBLIC.ORDERS
-    key_columns: [order_id]
-    mode: row_checksum
-    comparison:
-      numeric_scale: exact
-      columns:
-        - column: fx_rate   # the source-side name
-          numeric_scale: 8
-```
+[Comparison modes](https://docs.synq.io/reconciliation/comparison-modes#numeric-precision)
+gives the defaults, the precedence and examples. The traps:
 
-`numeric_scale: <places>` rounds, half away from zero, so it is not a tolerance: `10.1249`
-and `10.1250` differ by far less than `0.01` and still round apart at two places.
-
-The most specific setting wins: a reconciliation's entry for the column, then its
-`numeric_scale`, then the suite's entry for the column, then the suite's `numeric_scale`.
-`comparison:` applies to `row_checksum` mode only; set on a `row_count` or `aggregate`
-reconciliation, or on a suite with no `row_checksum` one, it is ignored with a warning.
-`check-config --db` reports every column `exact` cannot be compared at before a run does,
-where a run stops at the first.
-
-A timestamp is compared at the precision both sides hold, the coarser of the two, and
-between two different databases to the microsecond at most. That holds for a date or
-timestamp key column too: the drill splits on it like any key, and a source holding
-nanoseconds against a target holding microseconds puts each row in the same segment on
-both sides. `timestamp_precision:` overrides it, with `exact` comparing every digit
-both sides hold and failing the run when they hold different precisions.
-
-A timestamp without a time zone is compared as its wall clock, read as UTC. When a
-loader moved local wall clocks to UTC, or the other way round, name the zone each side's
-wall clocks are in, and both are compared as the instant they are:
-
-```yaml
-reconciliations:
-  loads:
-    source:
-      connection: gateway
-      table: dbo.loads
-    target:
-      connection: warehouse
-      table: ANALYTICS.PUBLIC.LOADS
-    key_columns: [load_ts, load_id]
-    mode: row_checksum
-    comparison:
-      timestamp_precision: millisecond
-      source_time_zone: Europe/Warsaw   # target_time_zone is not set: UTC
-```
-
-A timestamp with a time zone already says which instant it is, so a zone set for it is
-ignored with a warning. These settings are resolved like `numeric_scale`, the most
-specific first, and each side's zone on its own. A zone is converted by the database,
-so MySQL needs its time zone tables loaded, and Athena and Microsoft Fabric timestamps
-take neither setting.
+- `numeric_scale: <places>` rounds half away from zero. It is not a tolerance:
+  `10.1249` and `10.1250` round to different values at two places.
+- `numeric_scale: exact` fails if the two sides declare different scales. On a
+  floating-point column, it works only between two databases of the same kind.
+- `comparison:` applies to `row_checksum` only. Other modes ignore it with a
+  warning.
+- `check-config --db` reports every column that `exact` cannot compare. A run
+  stops at the first one.
 
 ---
 
 ## 5. Reading the output
 
-**Pick your format explicitly.** `-o` defaults to `table` for a human terminal
-and to `toon` when an AI-agent environment marker is present — so as an agent
-you will get `toon` unless you say otherwise. Anything parsing output must pass
-`-o json`.
+### Output formats
 
-**`run`, `run-check` and `run-drill` render only two shapes:** `-o json`, and a
-text report for every other value. `--jq`, `--columns`, `--no-headers` and
-`--wide` do not apply to them; pipe their `-o json` through `jq` yourself. The
-workspace commands (`suite`, `deployment`, `runs`, `audit-logs`, `connections`,
-`auth`) honour all six formats and all four flags.
+Set the format explicitly. `-o` is `table` in a terminal and `toon` when the CLI
+finds an AI agent environment. To parse output, pass `-o json`.
 
-**`run --auto-drill -o json` is not a single JSON document.** It emits the
-quick-check document, then a plain-text banner, then one drill document per
-drilled reconciliation. To parse the results, run the two stages separately —
-`run-check -o json` then `run-drill -o json` — each of which is one valid
-document. A suite mixing modes is the exception: an `aggregate`
-reconciliation's results are an array of their own, printed after any
-quick-check document, so `--include` one mode at a time.
+`run`, `run-check` and `run-drill` have only two formats: `-o json` and a text
+report. `--jq`, `--columns`, `--no-headers` and `--wide` have no effect on them,
+so send their `-o json` to `jq`. The workspace commands accept every format and
+these four flags.
+
+`run --auto-drill -o json` is not one JSON document. It prints the check
+document, a text banner, then one drill document for each reconciliation. To
+parse the results, run `run-check -o json` and `run-drill -o json` separately.
+Each prints one document. The results of an `aggregate` reconciliation are a
+separate array, so `--include` one mode at a time.
 
 ```bash
 # names that differ
 synq-recon run-check suite.yaml -o json | jq -r '.results[] | select(.match == false) | .name'
 
-# key ranges where the difference lives
+# key ranges of each difference
 synq-recon run-drill suite.yaml --include orders-daily -o json \
   | jq -r '.mismatch_leaves[] | "\(.segment.min_key) .. \(.segment.max_key)"'
 
-# ready-to-run SQL for one difference, both sides
+# SQL for one difference, both sides
 synq-recon run-drill suite.yaml --include orders-daily -o json \
   | jq -r '.investigation_queries[0] | .source_query, .target_query'
 ```
 
-For a run that already finished, `audit-logs queries <run>` gets the same SQL
-out of its audit log without re-running anything — see
-[Investigating a finished run](#7-investigating-a-finished-run).
+Logs go to stderr and results go to stdout. When you pipe `-o json`, use
+`2>/dev/null`, never `2>&1`.
 
-**Logs go to stderr, results to stdout.** Redirect with `2>/dev/null`, never
-`2>&1`, when piping `-o json`.
+### Exit codes
 
-**Exit codes.** Each code has one meaning in every command:
+Each code has the same meaning in every command:
 
 | Code | Meaning |
 |---|---|
-| `0` | Everything matched. For `run-remote --wait` and `trigger --wait`: no `--fail-on` status was reached. |
-| `1` | The data differs. For a waited remote run: a `--fail-on` status was reached (by default `mismatched` and `failed`). |
-| `2` | The run, or one of its reconciliations, could not run: a connection, a query, a timeout. |
-| `3` | The command itself failed before it had a result: a bad flag or config, a refused credential, an API error, an expired `--wait-timeout`. |
+| `0` | Everything matched. For `run-remote --wait` and `trigger --wait`: no `--fail-on` status occurred. |
+| `1` | The data differs. For a remote run with `--wait`: a `--fail-on` status occurred (by default `mismatched` and `failed`). |
+| `2` | The run, or one of its reconciliations, could not run: a connection, a query or a timeout. |
+| `3` | The command failed before it had a result: a bad flag or config, a refused credential, an API error, or an expired `--wait-timeout`. |
 
-A local run with both a difference and a failed reconciliation exits `2`, so
-`1` always means that every reconciliation produced a verdict. A remote run can
-succeed and still report a mismatch — that is the normal case. Give several
-`--fail-on` statuses comma-separated or by repeating the flag
-(`--fail-on mismatched,within_threshold`); the list replaces the default.
-`--fail-on=passed` inverts the test for a "these should differ" canary.
+A local run with a difference and a failed reconciliation exits `2`. Thus `1`
+always means that every reconciliation has a result. A remote run that
+completes can still report a mismatch, which is normal. `--fail-on` takes
+several statuses, separated by commas or with the flag repeated
+(`--fail-on mismatched,within_threshold`). The list replaces the default.
+`--fail-on=passed` makes a check for data that must differ.
 
-**Audit logs.** `--audit-log <path>` writes the full record of a run — every
-query, timing, count, checksum and mismatch leaf — as JSON. Pass a directory
-(trailing `/`) for an auto-named file. Its shape is the published AuditLog
-schema — [rendered](https://schemas.synq.io/synq-recon/v1/audit-log.html), or
-[`audit-log.schema.json`](https://schemas.synq.io/synq-recon/v1/audit-log.schema.json)
-to validate against.
+### Audit logs
 
-Useful paths, using the local file's casing:
+`--audit-log <path>` writes the full record of a run as JSON: every query,
+timing, count, checksum and mismatch leaf. For a file name made by the CLI,
+give a directory with a trailing `/`. The format is the AuditLog schema,
+[rendered](https://schemas.synq.io/synq-recon/v1/audit-log.html) or as
+[`audit-log.schema.json`](https://schemas.synq.io/synq-recon/v1/audit-log.schema.json).
 
 ```bash
 jq -r '.reconciliations[].reconciliation.name' audit.json
@@ -533,438 +354,318 @@ jq -r '.reconciliations[].stages[].quick_check_result? | select(.) | "\(.source_
 jq -r '.reconciliations[].stages[].bisection_result?.mismatch_leaves[]?.segment | "\(.min_key)..\(.max_key)"' audit.json
 ```
 
-Each mismatch leaf also carries a `drill_stop_reason` saying why drilling stopped
-there, `diff_queries` with ready-to-run SQL for both sides, and every
-`mismatch_types` that applies — so a segment differing in both size and content
-reports two:
+Each mismatch leaf has a `drill_stop_reason`, `diff_queries` with SQL for both
+sides, and all the `mismatch_types` that apply:
 
 | Value | Meaning |
 |---|---|
-| `SEGMENT_MISMATCH_TYPE_MISSING_IN_TARGET` | Rows on the source side, none on the target — a real gap. |
-| `SEGMENT_MISMATCH_TYPE_MISSING_IN_SOURCE` | Rows on the target side, none on the source — usually an orphan. |
-| `SEGMENT_MISMATCH_TYPE_COUNT_MISMATCH` | Both sides have rows, but not the same number. |
-| `SEGMENT_MISMATCH_TYPE_DATA_MISMATCH` | Both sides have rows and the checksums disagree — a value changed. |
+| `SEGMENT_MISMATCH_TYPE_MISSING_IN_TARGET` | Rows on the source, none on the target: a real gap. |
+| `SEGMENT_MISMATCH_TYPE_MISSING_IN_SOURCE` | Rows on the target, none on the source: usually an orphan. |
+| `SEGMENT_MISMATCH_TYPE_COUNT_MISMATCH` | Rows on both sides, but different counts. |
+| `SEGMENT_MISMATCH_TYPE_DATA_MISMATCH` | Rows on both sides, and the checksums differ: a value changed. |
 
-Count direction alone does not classify a difference: a target with one row *more*
-can still be missing a live row and carrying two orphans. Read the types.
+Do not classify a difference by the count only. A target with one more row can
+still miss a row and hold two orphans. Read the types.
 
-Two traps in the same file:
+Two traps in the audit log:
 
-> **Casing.** The local `--audit-log` file is snake_case (`bisection_result`,
-> `mismatch_leaves`). The same log fetched from the workspace with
-> `audit-logs get <invocation-id> -o json` is camelCase (`bisectionResult`,
-> `mismatchLeaves`). A `jq` path written for one source silently returns `null`
-> against the other.
-
-> **Counts are strings.** Row counts and checksums are 64-bit integers, which
-> JSON encodes as quoted strings in the audit log (`"source_count": "10"`) —
-> unlike `run-check -o json`, where they are numbers. Compare with `tonumber`.
+- The local `--audit-log` file uses snake_case (`bisection_result`). The same
+  log from `audit-logs get <invocation-id> -o json` uses camelCase
+  (`bisectionResult`). A `jq` path for one returns `null` on the other.
+- Counts and checksums are 64-bit integers, which the audit log writes as
+  strings (`"source_count": "10"`). `run-check -o json` writes numbers. Use
+  `tonumber` to compare.
 
 ---
 
 ## 6. What each command costs
 
-Reconciliation runs real queries against real warehouses, and on a
-consumption-priced warehouse those queries cost money. Know which commands spend
-before you put one in a loop.
+On a warehouse that charges for use, each query of a run costs money. Know the
+cost before you put a command in a loop.
 
 | Command | Warehouse cost |
 |---|---|
-| `check-config`, `plan` | None. Never connects. |
-| `check-config --db` | One planner call per query (`LIMIT 0`, no scan) plus a table-metadata sweep. |
-| `run-check` | One aggregate query per side. Scans the compared columns once. An `aggregate` reconciliation runs one grouped query per side per group column it descends into. |
-| `run-drill`, `run --auto-drill` | The highest key on each side, then for each segment it splits: a count and checksum per side, a boundary query on the source and one bucketed query per side. The first split uses the check's totals. Cheap on mostly-identical data, expensive when most rows differ. |
-| `recheck`, `drill-deeper` | Same as the stage they replay, but scoped to what the previous run left open — usually much cheaper than starting over. |
-| `upload-config`, `promote`, `suite …`, `deployment …`, `runs …`, `audit-logs …`, `entities …` | None. Workspace API only. |
-| `run-remote`, `trigger` | The run's cost, spent by the backend against workspace integrations. |
-| `upgrade`, `upgrade --check` | None. Reaches GitHub, not a warehouse and not the workspace. |
+| `check-config`, `plan`, `upgrade`, and the workspace commands except the two below | None. |
+| `check-config --db` | One planner call per query (`LIMIT 0`, no scan) and a read of table metadata. |
+| `run-check` | One aggregate query per side. An `aggregate` reconciliation sends one grouped query per side for each group column it descends into. |
+| `run-drill`, `run --auto-drill` | For each segment it splits: a count and checksum per side, a boundary query and one bucketed query per side. |
+| `recheck`, `drill-deeper` | The same as the stage they replay, but only for what is still open. |
+| `run-remote`, `trigger` | The cost of the run, spent by the backend against workspace integrations. |
 
-Two things worth knowing specifically:
+### Cost traps
 
-**`check-config --db`'s table analysis can scale with warehouse size, not suite
-size.** On platforms with no table-scoped metadata API — BigQuery in particular —
-enumerating table metadata walks the datasets rather than jumping straight to
-the tables your suite names. On a large warehouse that is slow and not free.
-This is why the analysis is confined to the interactive `check-config --db` and
-does not run before every reconciliation.
+- The table analysis of `check-config --db` can grow with the warehouse, not
+  with the suite. On BigQuery, and other platforms without a metadata API per
+  table, it reads the metadata of whole datasets. On a large warehouse this is
+  slow and costs money. Thus only `check-config --db` runs it.
+- `--max-table-rows` and `--max-table-bytes` make `run`, `run-check` and
+  `run-drill` estimate each scan first, with a dry run or `EXPLAIN`. The CLI
+  warns when an estimate is above the limit. Both are `0` (off) by default.
+  BigQuery and Snowflake estimate bytes. ClickHouse and PostgreSQL estimate
+  rows. DuckDB, Athena and Databricks give no estimate, so no warning occurs.
 
-**Gate a large run before it happens.** `--max-table-rows` and
-`--max-table-bytes` make `run`, `run-check` and `run-drill` estimate each
-reconciliation's scan first — a dry run or `EXPLAIN`, not a scan — and warn when
-an estimate exceeds the threshold. Both default to `0` (off) so automated runs
-incur no extra queries. BigQuery and Snowflake report bytes; ClickHouse and
-PostgreSQL report planner rows; DuckDB, Athena and Databricks advertise no
-estimate support, so a gated run there simply emits no warnings.
+### Limiting the load of a local run
 
-**Limit the load on one warehouse.** `--concurrency` sets how many
-reconciliations run at the same time. Each reconciliation queries both sides,
-and a drill can query many segments at the same time.
-`connections.<name>.parallelism` sets the maximum number of queries that a local
-run sends to that connection at the same time. The default is `8`.
+- `--concurrency` sets how many reconciliations run at the same time. Each
+  reconciliation queries both sides, and a drill can query many segments at the
+  same time.
+- `connections.<name>.parallelism` sets the maximum number of queries a local
+  run sends to that connection at the same time. The default is `8`.
+- `connections.<name>.disabled: true` stops a local run from running a
+  reconciliation, setup or teardown that uses that connection. If `--include`
+  names such a reconciliation, the command fails.
 
-**Turn off a connection.** With `connections.<name>.disabled: true`, a local run
-does not run a reconciliation that uses that connection in a dataset, in setup
-or in teardown. The run also does not send the suite's setup and teardown to
-that connection. If `--include` names one of these reconciliations, the command
-fails.
+These connection settings apply only to local runs. A suite in the workspace
+uses integrations.
 
-These two settings apply only to local runs. A suite in the workspace uses
-integrations for its connections, and these settings do not apply to it.
+### Keeping a local run local
 
-**Keep a local run local.** With a stored credential present, a locally executed
-run reports its results to Coalesce Quality so they appear in the workspace
-alongside backend runs — even when every database in the suite is local. It says
-so at `INFO`, naming the endpoint. A reported run never sends row values: at
-`detailed` they stay in the terminal and the `--audit-log` file. `detailed` is
-for local runs only: Coalesce Quality refuses to save, promote or run a suite
-that sets it, so use `with_keys` or `count_only` in a suite that runs in the
-workspace. After the
-upload it prints, to stderr, what Coalesce Quality says back about the stored
-run, such as a link to view it. Pass `--no-report` (or set `RECON_NO_REPORT`)
-to resolve no credential and open no connection at all.
+If a stored credential exists, a local run reports its results to Coalesce
+Quality, even when all its databases are local. It logs the endpoint at `INFO`,
+and prints a link to the stored run to stderr. A reported run never sends row
+values. To send nothing and resolve no credential, pass `--no-report` or set
+`RECON_NO_REPORT`.
 
-**Keep local-only settings in a `local:` block.** One suite file can hold the
-fixtures and the `detailed` reporting you use on your computer, and still go to
-the workspace unchanged. Put `setup`, `setup_file`, `teardown`, `teardown_file`
-and `reporting` under `local:`, at the suite level or in a reconciliation:
-
-```yaml
-local:
-  setup_file:
-    test-db: fixtures/orders.sql
-  teardown:
-    test-db: DROP TABLE IF EXISTS orders
-reconciliations:
-  orders:
-    reporting:
-      level: with_keys
-    local:
-      reporting:
-        level: detailed
-        consent_acknowledged: true
-```
-
-`run`, `run-check`, `run-drill`, `check-config` and `plan` merge the block into
-the suite. A connection under `local.setup` or `local.teardown` replaces the
-queries of that connection outside the block, and the other connections keep
-theirs. A reporting field under `local.reporting` replaces the same field, and
-the fields it does not set keep their values. The suite's `local.reporting`
-applies to every reconciliation, and a reconciliation's own `local.reporting`
-takes precedence. `upload-config` does not send the block and does not read its
-files, and **Upload config** in the app drops it, so the workspace never runs
-your fixtures against its warehouse. `check-config` reports a problem in the
-block, such as an unknown connection or `detailed` without
-`consent_acknowledged`, with `local` in the message. Only these five settings
-are allowed in the block.
+`reporting.level: detailed` is for local runs only. Coalesce Quality does not
+save, promote or run a suite with `detailed`. In a workspace suite, use
+`with_keys` or `count_only`. To keep `detailed` and local fixtures in the same
+file, put them in a `local:` block, see
+[Settings for local runs only](https://docs.synq.io/reconciliation/authoring-suites#settings-for-local-runs-only).
+`upload-config` and **Upload config** in the app drop the `local:` block, so the
+workspace never runs your fixtures.
 
 ---
 
 ## 7. Investigating a finished run
 
-`audit-logs queries`, `recheck` and `drill-deeper` all take a finished run
-instead of a suite — either a local audit-log file or, for a run stored in the
-workspace, its invocation id.
+`audit-logs queries`, `recheck` and `drill-deeper` take a finished run, not a
+suite. The run is a local audit log file or the invocation id of a stored run.
 
-**Get the SQL back — `audit-logs queries <run>`.** A locally executed run prints
-its investigation queries as it finishes; this is how you get them afterwards,
-from a stored run, from a backend run you never watched, or from a terminal
-whose scrollback is gone. It reaches no warehouse.
+### Getting the SQL back
+
+`audit-logs queries <run>` prints the investigation queries of a finished run:
+a stored run, a backend run, or a run whose output you lost. It connects to no
+warehouse.
 
 ```bash
-# The ready-to-run SQL for whatever the run found, both sides
+# SQL for each difference the run found, both sides
 synq-recon audit-logs queries audit.json
 
 # One reconciliation of a stored run
 synq-recon audit-logs queries 3f7c1e28-5a1b-4c9e-9f10-2b7d8e6a4c53 --include orders-daily
 
-# What the run itself issued, in stage order
+# The queries the run sent, in stage order
 synq-recon audit-logs queries audit.json --executed
 
-# Pipe one side straight into a client
+# One side, to a client
 synq-recon audit-logs queries audit.json -o json | jq -r '.[0].source_query'
 ```
 
-What comes out follows how the difference was found. A bisection drill yields
-merged key-range queries — one per run of adjacent mismatched segments, since
-neighbouring bad segments are one range rather than five; `--all-leaves` also
-prints the per-segment queries those cover. An aggregate comparison yields one
-pair per divergent group. A run that matched, or never drilled, has none.
+A bisection drill gives one query pair for each range of adjacent mismatched
+segments. `--all-leaves` also prints the query of each segment. An aggregate
+comparison gives one pair for each group that differs. A run that matched, or
+did not drill, has no queries.
+
+### Replaying a run
 
 ```bash
-# Did the difference go away? (e.g. after a backfill)
+# Is the difference gone? (for example, after a backfill)
 synq-recon recheck audit.json --connections .connections.yaml
 
-# Narrow every still-open segment to 100-row ranges
+# Narrow each open segment to ranges of 100 rows
 synq-recon drill-deeper audit.json --connections .connections.yaml --threshold 100
 
-# Break each divergent aggregate group down by another column
+# Split each aggregate group that differs by one more column
 synq-recon drill-deeper audit.json --add-group-column region
 ```
 
-Four things govern how they behave:
-
-- **Queries are replayed, not re-derived.** The audit log holds each query after
-  variable interpolation and cutoff resolution, so a re-check compares the same
-  window the original run did — which is what makes "did the gap move?" a
-  meaningful question. It also means a replay will not pick up an edited query
-  or variable until you pass `--reresolve`. `--reresolve` is required for an
-  `as_of` snapshot, which can otherwise never turn green.
-- **Only what was left open resumes.** `drill-deeper` picks up the segments the
-  previous run stopped at on its row threshold or depth limit; `--depth` counts
-  from the depth they already reached, so it means "this many more levels".
-  Segments that could not be split further, and aggregate groups present on only
-  one side, are reported and skipped rather than silently dropped. An aggregate
-  drill already visits every configured group column, so resuming one needs at
-  least one `--add-group-column`. A group whose recorded key matches no row on
-  either side, as a key recorded by an older release can, is reported and
-  skipped too, and a resume left with no group fails rather than passing.
-- **`recheck` re-runs only the reconciliations that did not pass.** `--all`
-  re-runs every one.
-- **Credentials never come from an audit log** — it records connection *names*
-  only. Pass `--connections`, exactly as for a normal run.
-
-Add `--remote` to either command to hand the replay to the backend instead,
-running it against workspace integrations. `--remote` needs a stored run's
-invocation id (a local file has nothing server-side to reference) and accepts
-`--include` but not `--exclude`.
+A replay sends the queries of the original run, with the same variables and
+cutoffs, so it compares the same window. To use an edited query or the current
+data, pass `--reresolve`. An `as_of` snapshot needs `--reresolve`, or it can
+never pass. An audit log holds connection names, never credentials, so pass
+`--connections`. `--remote` sends the replay to the backend, and needs the
+invocation id of a stored run. [Re-check and Drill deeper](https://docs.synq.io/reconciliation/investigating-results#re-check-and-drill-deeper)
+gives the other rules.
 
 ---
 
 ## 8. Command reference
 
-`synq-recon <command> --help` is authoritative. This is the map.
-
-### Local
-
-| Command | What it does |
-|---|---|
-| `check-config <file>` | Validate a suite. `--db` also connects, validates every query, and analyses tables. |
-| `plan <file>` | Print the resolved execution plan — the exact SQL each side will run — without executing it. |
-| `run-check <file>` | Stage 1: each reconciliation's own comparison (counts, checksums or aggregate measures), no drill. |
-| `run-drill <file>` | Stage 2: bisect to locate differences. `--depth`, `--threshold`. |
-| `run <file>` | Stage 1, then stage 2 on whatever mismatched with `--auto-drill`. |
-| `recheck <run>` | Re-execute a finished run's queries and report what changed. `--all`, `--drill`, `--reresolve`. |
-| `drill-deeper <run>` | Continue a finished run's drill. `--threshold`, `--depth`, `--add-group-column`. |
-| `dump-suite <file>` | Print the parsed suite as protojson. Debugging aid. |
-| `upgrade` | Replace this binary with the latest release, verified against the release's `checksums.txt`. `--check` reports what it would do. |
-
-### Workspace
+`synq-recon <command> --help` is the full reference, and the
+[CLI reference](https://docs.synq.io/reconciliation/cli) page has the same
+content. This section is the map.
 
 | Command | What it does |
 |---|---|
-| `auth login` / `logout` / `status` / `token` / `whoami` | Browser login and credential inspection. `--region` picks the deployment; `--auth-profile` picks which credential profile to read or write; `--isolated` stores a credential for `synq-recon` alone rather than sharing it with the other Coalesce Quality CLIs; `--coalesce` (with an optional `--organization`) logs in with a Coalesce account. |
-| `upload-config <file>` | Save a suite to the workspace (Development). It copies the SQL of each `setup_file` and `teardown_file` into the suite, and leaves out the `local:` blocks. `--change-summary` (default: a summary that gives the file name). |
-| `suite list` / `get` / `yaml` / `versions` / `delete` / `bootstrap` | Manage stored suites. `yaml` renders one back to editable YAML; `bootstrap` prints a skeleton. `list` takes `--connection`, `--include-adhoc`, `--limit`. |
-| `connections remote list` / `bootstrap` | Inspect workspace integrations; generate a matching `.connections.yaml`. |
-| `entities search <text>` / `resolve <fqn>` | Find a table's physical `database.schema.table` in the workspace catalog. Optional — see § 4. |
-| `run-remote <suite-id>` | Ad-hoc backend run. `--drill`, `--map`, `--execution-timeout`, `--invocation-id`, `--wait`, `--fail-on`, `--wait-timeout`, `--poll-interval`. |
-| `promote <suite-id>` | Publish to Production. `--diff` previews and promotes nothing. `--schedule` (cron) or `--ical` (RFC 5545) with `--timezone` and optional `--dtstart`, plus `--triggerable-by-api`, `--drill`, `--execution-timeout`, `--map`, `--annotation`, `--category`, `--governance-category`, `--case-category`, `--case-governance-category`, `--clear-schedule`, `--deployment-id`, `--change-summary`. |
-| `trigger <suite-id>` | Run a promoted deployment on demand. `--drill`, `--execution-timeout`, `--invocation-id`, `--wait`, `--fail-on`, `--deployment-id`. The invocation id becomes the run id, and a retry with the same `--invocation-id` returns the run the first call started instead of starting another. |
-| `unpromote <suite-id>` | Deactivate a deployment; history is kept. `--reason`. |
-| `deployment list` / `get` / `history` / `update` / `pause` / `resume` / `set-annotations` / `set-categories` | Inspect and edit deployments in place. `update` takes the same schedule and run-setting flags as `promote`, plus `--clear`; `pause` takes `--until`; `set-categories` takes the four category flags. |
-| `runs list` / `cancel` | Inspect and cancel run state. `list` filters on `--status`, `--trigger`, `--suite`, `--deployment`, `--actor`, `--limit`. |
-| `audit-logs list` / `get <invocation-id>` / `queries <run>` | Inspect stored run results. `list` filters on `--status`, `--suite`, `--limit`; `queries` prints a finished run's investigation SQL, or `--executed` for what it ran. |
+| `check-config <file>` | Validates a suite. `--db` also connects. |
+| `plan <file>` | Prints the resolved SQL of each side, without a run. |
+| `run-check` / `run-drill` / `run <file>` | Stage 1 (compare), stage 2 (bisect), or both with `--auto-drill`. |
+| `recheck` / `drill-deeper <run>` | Replays a finished run, see [Investigating a finished run](#7-investigating-a-finished-run). |
+| `dump-suite <file>` | Prints the parsed suite as protojson, for debugging. |
+| `upgrade` | Replaces this binary with the latest verified release. |
+| `auth login` / `logout` / `status` / `token` / `whoami` / `use` | Manages the credential, see [Confirm the target](#3-confirm-the-target-before-any-mutation). |
+| `upload-config <file>` | Saves a suite to Development. It copies the SQL of each `setup_file` and `teardown_file` into the suite, and drops the `local:` blocks. |
+| `suite …` | Manages stored suites. `suite yaml` gives an editable YAML file. |
+| `connections remote list` / `bootstrap` | Lists workspace integrations, and makes a matching `.connections.yaml`. |
+| `entities search` / `resolve` | Finds the physical path of a table in the catalog. |
+| `run-remote <suite-id>` | Starts an ad hoc backend run. |
+| `promote` / `unpromote <suite-id>` | Publishes to Production, or stops a deployment and keeps its history. |
+| `trigger <suite-id>` | Runs a deployment now. A retry with the same `--invocation-id` returns the first run. |
+| `deployment …` | Shows and edits deployments. |
+| `runs …`, `audit-logs …` | Shows and cancels runs, and shows stored results. |
 
-**Deployment edits preserve what you omit.** `promote` on a re-promote, and
-`deployment update` always, change only the settings you actually pass — so
-refreshing a suite snapshot never silently unschedules the deployment or
-disables API triggers. Removing a schedule is therefore explicit:
-`deployment update --clear` or `promote --clear-schedule`. A *fresh* promote
-applies defaults instead: no schedule, not triggerable, drill on.
+### Editing a deployment
 
-**Declare a check category on the promotion, not in the suite file.** A
-reconciliation becomes a *check* only once it is promoted, so where it sits in
-the catalog is a property of the deployment — the same reason the schedule lives
-there. Two independent dimensions are available, and both are free-form strings
-using whatever vocabulary the workspace already has:
+`promote` on an existing deployment, and `deployment update`, change only the
+settings you pass. Thus a new snapshot never removes the schedule or the API
+trigger. To remove a schedule, pass `deployment update --clear` or
+`promote --clear-schedule`. A first promote uses the defaults: no schedule, no
+API trigger, and drill on.
 
-- `--category` is the **technical** dimension: what kind of check this is,
-  mechanically. It is what makes the same check comparable across tools, so a
-  reconciliation, a dbt test and a SQLMesh audit that all compare values can share
-  one category.
-- `--governance-category` is what the check is **for** — the dimension a
-  data-governance function tracks coverage against.
-
-Both dimensions and the vocabulary in use are described in
-[Check categories](https://docs.synq.io/analytics/check-categories).
-
-```bash
-# every case of this suite compares values, and covers accuracy
-synq-recon promote orders-suite --category comparison --governance-category accuracy
-
-# change it later without re-promoting the suite
-synq-recon deployment set-categories orders-suite --governance-category accuracy
-```
-
-Each dimension is patched on its own: a flag you omit keeps its stored value, and
-passing an empty value clears the declaration. So `--category ""` stops declaring
-a technical category while leaving the governance one alone.
-
-Cases of one suite are the same *kind* of check but do not always serve the same
-governance purpose, so either dimension can be overridden per case. A case
-overrides only the dimensions you name and inherits the rest:
-
-```bash
-# this case only compares row counts, so it covers completeness rather than accuracy
-synq-recon deployment set-categories orders-suite --case-governance-category row-counts=completeness
-```
-
-Declaring nothing is the default, and it is not the same as declaring nothing
-*for a case*. With no declaration, a category is decided by a reserved
-`quality.check_category` / `quality.governance_category` annotation on the suite
-or case if one is set, and otherwise by the workspace's own categorisation rules
-— so leaving these flags alone keeps whatever already categorises your checks.
-Passing `--case-category customers=` declares that *this case* has no category,
-which overrides the deployment's declaration rather than inheriting it.
-
-Annotations reach the check too, so `annotations:` in the suite file drives
-annotation-matching categorisation rules without any of these flags.
-
-**Check a promote before making it.** Promotion replaces what production runs,
-and a deployment is a snapshot rather than a pointer, so there is no undo short
-of promoting again. `promote <suite-id> --diff` runs the exact invocation you
-are about to run and applies nothing:
+Run `promote <suite-id> --diff` before each promote. A promote replaces what
+production runs, and the only undo is another promote:
 
 ```bash
 synq-recon promote orders-suite --diff --schedule '0 * * * *' --timezone UTC
 ```
 
-It prints a YAML diff of the deployed snapshot against the stored suite, then
-every deployment setting labelled with what this invocation does to it —
-`changed`, `unchanged`, `preserved (flag not passed)`, or the fresh-promote
-default. That labelling is the point: an omitted `--schedule` and a removed
-schedule are indistinguishable from the command line alone.
+It prints a YAML diff of the deployed snapshot against the stored suite. Then it
+labels each deployment setting: `changed`, `unchanged`,
+`preserved (flag not passed)`, or the default of a first promote. Without these
+labels, an omitted `--schedule` and a removed schedule look the same.
 
-**A deployment's id is part of every reconciliation's asset path**, so it is
-worth keeping stable — rebuilding a deployment from scratch under a new id
-re-homes its checks and drops their history. Re-promoting the same suite reuses
-its id automatically; `promote --deployment-id <id>` pins one explicitly when
-you are rebuilding.
+The deployment id is part of the asset path of each reconciliation. A new
+deployment with a new id moves its checks and drops their history. A promote of
+the same suite uses the same id. To set the id when you rebuild a deployment,
+use `promote --deployment-id <id>`.
 
-### Flags accepted by every command
+### Check categories
 
-| Flag | Notes |
-|---|---|
-| `-o, --output` | `table`, `json`, `yaml`, `toon`, `tsv`, `wide`. See [Reading the output](#5-reading-the-output). |
-| `--jq`, `--columns`, `--no-headers`, `--wide` | Shape structured output. Not honoured by `run`/`run-check`/`run-drill`. |
-| `-v, --verbose` | Verbose logging, to stderr. |
-| `--include`, `--exclude` | Select reconciliations by name; repeatable. Default is all. |
-| `--var key=value` | Set or override a template variable; repeatable. |
-| `--connections` | Connections file. Auto-discovers `.connections.yaml` / `connections.yaml` in the working directory. |
-| `--dbt-profiles` | Resolve connections from a dbt `profiles.yml` as a fallback. |
-| `--timeout` | Wall-clock budget of a local run. Default: the suite's `execution.timeout`, else `5m`. Not the server-side run budget — that is `--execution-timeout`, which falls back to the deployment's value, then the suite's `execution.timeout`. There is no flag for a single reconciliation's budget: set `execution.reconciliation_timeout` on the suite, or `timeout` on a reconciliation, and one that runs past it fails with a timeout while the run moves on. |
-| `--concurrency` | Reconciliations to run in parallel. Default: the suite's `execution.concurrency`, else `1`. Server-side runs read `execution.concurrency` and may cap it lower. |
-| `--max-table-rows`, `--max-table-bytes` | Pre-run scan estimate gate; `0` = off. |
-| `--audit-log` | Write the run's audit log JSON to a file, or to a directory for an auto-named one. |
-| `--no-report` | Keep the run local (or `RECON_NO_REPORT`). |
-| `--actor-email` | Attribute write operations to this address (or `RECON_ACTOR_EMAIL`). |
-| `--client-id`, `--client-secret` | Client credentials, overriding environment and YAML. |
-| `--region`, `--endpoint` | Which deployment to talk to; see § 3. `--region` tab-completes. |
-| `-y, --yes`, `--force` | Skip confirmation prompts; `--force` also bypasses safety checks. |
+Set a check category on the deployment, not in the suite file, because a
+reconciliation is a check only after a promote. `--category` is the technical
+category and `--governance-category` is what the check is for, see
+[Check categories](https://docs.synq.io/analytics/check-categories).
+
+```bash
+synq-recon promote orders-suite --category comparison --governance-category accuracy
+synq-recon deployment set-categories orders-suite --case-governance-category row-counts=completeness
+```
+
+An omitted flag keeps the stored value. An empty value (`--category ""`)
+removes the declaration. A case overrides only the categories you name. Without
+a declaration, a `quality.check_category` / `quality.governance_category`
+annotation decides, else the categorisation rules of the workspace.
+
+### Flags with traps
+
+- `--timeout` is the time limit of a local run. The default is the
+  `execution.timeout` of the suite, else `5m`. The time limit of a backend run is
+  `--execution-timeout`, which falls back to the deployment, then to
+  `execution.timeout`. For one reconciliation, set
+  `execution.reconciliation_timeout` on the suite or `timeout` on the
+  reconciliation. Such a reconciliation fails with a timeout, and the run
+  continues.
+- `--concurrency` falls back to `execution.concurrency`, else `1`. Backend runs
+  read `execution.concurrency` and can use a lower limit.
+- `--connections` finds `.connections.yaml` or `connections.yaml` in the working
+  directory automatically. `--dbt-profiles` reads connections from a dbt
+  `profiles.yml` if the suite does not define them.
+- `--force` skips safety checks too, not only confirmation prompts.
 
 ---
 
 ## 9. Worked example
 
-Runnable end to end against the DuckDB fixtures shipped beside the binary — no
-warehouse, no credentials, no network. The suite deliberately contains a
-difference: one missing order and one with a wrong amount.
+This example uses the DuckDB fixtures in `examples/` of a release archive. It
+needs no warehouse, credentials or network. The suite has two differences on
+purpose: one missing order and one wrong amount.
 
-Run it from an unpacked release archive, which carries `examples/` next to the
-binary. Every published build has DuckDB linked in, so the fixtures work as they
-are.
+1. Validate:
 
-**1. Validate.**
+   ```bash
+   ./synq-recon check-config examples/ecommerce.yaml
+   # Configuration check passed!
+   ```
 
-```bash
-./synq-recon check-config examples/ecommerce.yaml
-# Configuration check passed!
-```
+2. Compare:
 
-**2. Compare.**
+   ```bash
+   ./synq-recon run-check examples/ecommerce.yaml --include ecommerce-orders --no-report
+   ```
 
-```bash
-./synq-recon run-check examples/ecommerce.yaml --include ecommerce-orders --no-report
-```
+   ```
+   Reconciliation: E-Commerce Orders (Payment Gateway vs Warehouse) (ecommerce-orders)
+   Mode: row_checksum
 
-```
-Reconciliation: E-Commerce Orders (Payment Gateway vs Warehouse) (ecommerce-orders)
-Mode: row_checksum
+                Source              Target
+   Row Count    10                  9
 
-             Source              Target
-Row Count    10                  9
+   Status: MISMATCH
+     - Source has 1 more rows than target
 
-Status: MISMATCH
-  - Source has 1 more rows than target
+   Hint: Run 'synq-recon run-drill <config> --include ecommerce-orders' to locate differences.
+   ```
 
-Hint: Run 'synq-recon run-drill <config> --include ecommerce-orders' to locate differences.
-```
+   The exit code is 1: differences found, as expected.
 
-Exit code 1 — differences found, as intended.
+3. Locate the differences and keep the audit log:
 
-**3. Locate them, keeping the audit log.**
+   ```bash
+   ./synq-recon run examples/ecommerce.yaml --include ecommerce-orders \
+     --auto-drill --no-report --audit-log /tmp/orders.json
+   ```
 
-```bash
-./synq-recon run examples/ecommerce.yaml --include ecommerce-orders \
-  --auto-drill --no-report --audit-log /tmp/orders.json
-```
+   ```
+   Depth 0: Segment [*, *)
+     Source: 10 rows, checksum: -139824023944409
+     Target: 9 rows, checksum: -144133400916972
+     Status: MISMATCH -> drilling down (2/10 rows in mismatched segments)
+     Depth 1: Segment [1,005, 1,006)
+       Source: 1 rows, checksum: 53805022444628
+       Target: 0 rows, checksum: 0
+       Status: MISMATCH (leaf: threshold_reached)
+     Depth 1: Segment [1,010, 1,011)
+       Source: 1 rows, checksum: 20466544489071
+       Target: 1 rows, checksum: 69962189961136
+       Status: MISMATCH (leaf: threshold_reached)
+   ```
 
-```
-Depth 0: Segment [*, *)
-  Source: 10 rows, checksum: -139824023944409
-  Target: 9 rows, checksum: -144133400916972
-  Status: MISMATCH -> drilling down (2/10 rows in mismatched segments)
-  Depth 1: Segment [1,005, 1,006)
-    Source: 1 rows, checksum: 53805022444628
-    Target: 0 rows, checksum: 0
-    Status: MISMATCH (leaf: threshold_reached)
-  Depth 1: Segment [1,010, 1,011)
-    Source: 1 rows, checksum: 20466544489071
-    Target: 1 rows, checksum: 69962189961136
-    Status: MISMATCH (leaf: threshold_reached)
-```
+   Order 1005 is missing on the target. Order 1010 is on both sides, but its
+   checksum differs, so a value changed. Only two of ten rows needed a look.
 
-Order 1005 is missing from the target; order 1010 exists on both sides but its
-checksum differs, so a column value changed. Two rows out of ten needed looking
-at — that is the whole point of the bisection.
+4. Get the SQL that shows the rows, and run it on the two connections:
 
-**4. Get the SQL that shows the actual rows.**
+   ```bash
+   ./synq-recon run-drill examples/ecommerce.yaml --include ecommerce-orders \
+     --no-report -o json 2>/dev/null \
+     | jq -r '.investigation_queries[] | .source_query, .target_query, "--"'
+   ```
 
-```bash
-./synq-recon run-drill examples/ecommerce.yaml --include ecommerce-orders \
-  --no-report -o json 2>/dev/null \
-  | jq -r '.investigation_queries[] | .source_query, .target_query, "--"'
-```
+5. Check again after a fix. The suite defines its connection, so a replay needs
+   a connections file with that name:
 
-Run those against the two connections to see the differing rows themselves.
+   ```bash
+   printf 'connections:\n  test-db:\n    duckdb:\n      database: ":memory:"\n' > /tmp/conn.yaml
+   ./synq-recon recheck /tmp/orders.json --connections /tmp/conn.yaml --no-report
+   ```
 
-**5. Re-check after a fix.** The example's connection is defined in the suite,
-so replaying it needs a connections file naming it:
+   ```
+   RECONCILIATION    BEFORE       AFTER        CHANGE
+   ----------------  -----------  -----------  ------------------------------------------
+   ecommerce-orders  mismatched   mismatched   still mismatched (row gap unchanged at -1)
+   ```
 
-```bash
-printf 'connections:\n  test-db:\n    duckdb:\n      database: ":memory:"\n' > /tmp/conn.yaml
-./synq-recon recheck /tmp/orders.json --connections /tmp/conn.yaml --no-report
-```
+   Nothing changed because nothing was fixed.
 
-```
-RECONCILIATION    BEFORE       AFTER        CHANGE
-----------------  -----------  -----------  ------------------------------------------
-ecommerce-orders  mismatched   mismatched   still mismatched (row gap unchanged at -1)
-```
+6. Try the aggregate mode, which finds a difference by group, not by key range:
 
-Nothing changed because nothing was fixed — but that line is the shape of the
-answer you are looking for after a real remediation.
+   ```bash
+   ./synq-recon run examples/ecommerce.yaml --include inventory-reconciliation \
+     --auto-drill --no-report
+   ```
 
-**6. Try the aggregate mode** on the same suite, which localises a difference
-by group rather than by key range:
-
-```bash
-./synq-recon run examples/ecommerce.yaml --include inventory-reconciliation \
-  --auto-drill --no-report
-```
-
-More scenarios live in [`examples/`](examples/), one per business case.
-`./examples/test-all-examples.sh` runs every one.
+[`examples/`](examples/) has one scenario for each business case.
+`./examples/test-all-examples.sh` runs all of them.
 
 ---
 
@@ -972,16 +673,13 @@ More scenarios live in [`examples/`](examples/), one per business case.
 
 | What you see | What it means |
 |---|---|
-| `Validation failed: no connections defined` from offline `check-config` | The suite's `connection:` fields are workspace integration ids, not local definitions. Pass `--connections <file>` to validate the wiring, add `--db` to connect. |
-| Every query fails `check-config --db` with "table does not exist" | `--db` does not run the suite's `setup:` SQL. Expected for a suite whose tables are created by setup. |
-| `no connections available to replay run …` | `recheck` / `drill-deeper` need `--connections`: an audit log records connection names, never credentials. |
-| `accepts 1 arg(s), received 2` | A reconciliation name was passed positionally. Use `--include <name>`. |
-| A drill produces thousands of leaves and takes minutes | The data is not mostly-identical. Localise with an aggregate comparison first — see [Never do these](#2-never-do-these). |
-| `grouping by <columns> produced more than … groups` | An aggregate compares groups, and this grouping has nearly one group per row, usually because `group_columns` is unset and the key column stands in for it. Group by a coarser column, leave both `group_columns` and the key columns unset to compare totals over the whole dataset, use `row_count` to compare counts (with `row_count.thresholds` for a tolerance), or `row_checksum` to compare row by row. |
-| A warning that the stored credential is missing a scope | The command still works if the scope it needs is present. A credential without the reporting scope only means a local run's results are not reported; the comparison is unaffected. |
-| `deployment is not active; re-promote to modify` | The deployment was unpromoted. Re-promote before changing or tearing it down. |
-| `N connection(s) could not be bound to an integration` | A suite connection has no matching workspace integration, or the integration is not permitted for reconciliation. Check names with `connections remote list`, or bind explicitly with `--map name=integration_id`. |
-| `-o json` output will not parse | Either logs were merged into stdout (`2>&1`), or it was `run --auto-drill`, which emits more than one document. See [Reading the output](#5-reading-the-output). |
-| A promoted suite still runs the old comparison | A deployment is a snapshot. Re-promote after editing the suite. |
-| An Oracle reconciliation fails with `ORA-01489: result of string concatenation is too long` and names `GRANT EXECUTE ON SYS.DBMS_CRYPTO` | A compared row's joined text is over 4000 bytes, and the connection's user cannot call `DBMS_CRYPTO`, which hashing a longer row needs. A database administrator runs `GRANT EXECUTE ON SYS.DBMS_CRYPTO TO <user>`. Rows of up to 4000 bytes compare without it. |
-| `type: duckdb` fails inside the Docker image | That image was built without CGO. Current images support DuckDB — pull `:latest`, or use a locally built binary. |
+| `Validation failed: no connections defined` from offline `check-config` | The `connection:` fields are workspace integration ids. Pass `--connections <file>`, and add `--db` to connect. |
+| `no connections available to replay run …` | Pass `--connections` to `recheck` or `drill-deeper`. |
+| `accepts 1 arg(s), received 2` | You gave a reconciliation name as an argument. Use `--include <name>`. |
+| `grouping by <columns> produced more than … groups` | The grouping has almost one group per row, usually because `group_columns` is not set and the key column is used. Group by a coarser column, set neither `group_columns` nor key columns to compare totals, or use `row_count` or `row_checksum`. |
+| A warning that the stored credential has no scope | The command works if it has the scope it needs. Without the reporting scope, a local run does not report its results. |
+| `deployment is not active; re-promote to modify` | The deployment was unpromoted. Promote again before you change or remove it. |
+| `N connection(s) could not be bound to an integration` | No workspace integration has the connection name, or it is not allowed for reconciliation. Check with `connections remote list`, or bind with `--map name=integration_id`. |
+| `-o json` output does not parse | See [Output formats](#output-formats). |
+| Oracle fails with `ORA-01489: result of string concatenation is too long` and names `GRANT EXECUTE ON SYS.DBMS_CRYPTO` | A row is longer than 4000 bytes, and the user cannot call `DBMS_CRYPTO`, which longer rows need. A database administrator runs `GRANT EXECUTE ON SYS.DBMS_CRYPTO TO <user>`. |
+| `type: duckdb` fails in the Docker image | That image has no CGO. Pull `:latest`, or use a binary that you built. |
